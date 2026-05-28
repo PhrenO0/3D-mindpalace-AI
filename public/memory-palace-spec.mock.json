@@ -1,0 +1,82 @@
+{
+  "title": "광화문 조선 기억궁전",
+  "sourceSummary": "조선의 제도와 문화를 세종대왕 동상 위치의 대표 방에 5개 기억 사물로 배치한 1주차 시연 데이터입니다.",
+  "space": {
+    "id": "gwanghwamun",
+    "name": "광화문 광장",
+    "route": ["sejong-daero-entry", "yi-sunsin", "sejong-statue", "gwanghwamun-front", "gyeongbokgung"]
+  },
+  "rooms": [
+    {
+      "id": "room-03-sejong",
+      "anchorId": "sejong-statue",
+      "title": "조선의 제도와 문화",
+      "summary": "세종대왕 동상 위치에서 문자, 학문, 과학, 법제, 국가 운영을 하나의 방 안에 순서 있게 배치합니다.",
+      "concepts": [
+        {
+          "id": "hunminjeongeum",
+          "term": "훈민정음",
+          "summary": "백성이 쉽게 익힐 수 있도록 창제된 문자 체계",
+          "visualCue": "빛나는 책"
+        },
+        {
+          "id": "jiphyeonjeon",
+          "term": "집현전",
+          "summary": "학자들이 연구와 편찬을 이어간 지식 생산 기관",
+          "visualCue": "문서함"
+        },
+        {
+          "id": "science",
+          "term": "과학기술",
+          "summary": "천문, 시간, 측량 기술의 발전",
+          "visualCue": "해시계"
+        },
+        {
+          "id": "law-and-politics",
+          "term": "유교 정치와 법제",
+          "summary": "국가 운영의 규범, 법, 예치 질서",
+          "visualCue": "비석"
+        },
+        {
+          "id": "statecraft",
+          "term": "국가 운영",
+          "summary": "토지, 행정, 군사, 문화 정책의 연결 구조",
+          "visualCue": "벽면 지도"
+        }
+      ]
+    }
+  ],
+  "placements": [
+    {
+      "roomId": "room-03-sejong",
+      "conceptId": "hunminjeongeum",
+      "objectId": "hunminjeongeum-book",
+      "positionHint": "center-desk"
+    },
+    {
+      "roomId": "room-03-sejong",
+      "conceptId": "jiphyeonjeon",
+      "objectId": "jiphyeonjeon-archive",
+      "positionHint": "left-front-wall"
+    },
+    {
+      "roomId": "room-03-sejong",
+      "conceptId": "science",
+      "objectId": "science-sundial",
+      "positionHint": "right-front-stand"
+    },
+    {
+      "roomId": "room-03-sejong",
+      "conceptId": "law-and-politics",
+      "objectId": "law-stone-tablet",
+      "positionHint": "left-back-wall"
+    },
+    {
+      "roomId": "room-03-sejong",
+      "conceptId": "statecraft",
+      "objectId": "state-map",
+      "positionHint": "back-wall"
+    }
+  ],
+  "mappingRationale": "세종대왕 동상은 문자, 제도, 지식 체계를 떠올리기 쉬운 실제 공간 단서이므로 조선의 문화와 국가 운영 개념을 대표 방으로 묶었습니다."
+}
