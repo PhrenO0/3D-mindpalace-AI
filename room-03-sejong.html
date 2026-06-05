@@ -179,15 +179,20 @@
     /* ── 핫스팟(마커) 데이터 ── */
     let HOTSPOTS = [];
 
+    /* ── 에셋 URL (Azure Blob Storage, 컨테이너: models) ── */
+    const BLOB_BASE     = "https://9aiteam1.blob.core.windows.net/models";
+    const HOTSPOTS_URL  = `${BLOB_BASE}/my-room-3d-hotspots.json`;
+    const ROOM_GLB_URL  = `${BLOB_BASE}/the_smoking_room.glb`;
+
     /* ── 핫스팟 JSON 먼저 읽고 → GLB 로드 ── */
-    fetch("/models/my-room-3d-hotspots.json")
+    fetch(HOTSPOTS_URL)
       .then((r) => r.json())
       .then((data) => { HOTSPOTS = data.hotspots || []; })
       .catch((e) => console.error("핫스팟 로드 실패:", e))
       .finally(loadRoom);
 
     function loadRoom() {
-      new GLTFLoader().load("/models/the_smoking_room.glb", (gltf) => {
+      new GLTFLoader().load(ROOM_GLB_URL, (gltf) => {
         const model = gltf.scene;
 
         const box  = new THREE.Box3().setFromObject(model);
