@@ -1,5 +1,19 @@
 node_modules/
 .env
+# 로컬 전용 VWorld 키 주입 파일 (file:// 더블클릭용). 공유/커밋 금지.
+public/vworld-local-key.js
+# GLB를 base64로 박은 자동 생성 파일(각 약 12MB). GLB에서 재생성 가능하므로 커밋 불필요.
+public/hanok-glb-datauri.local.js
+public/room03-glb-datauri.local.js
+# 외부에서 가져온 대용량 테스트 GLB. 커밋하지 않음.
+public/assets/rooms/the_smoking_room.glb
+public/assets/rooms/dining_kitchen_baked.glb
+# Infinigen으로 생성한 방 GLB(WSL에서 재생성 가능). 커밋하지 않음.
+public/assets/rooms/infinigen-room*.glb
+# 3D-FRONT에서 받은 테스트 방 GLB. 커밋하지 않음.
+public/assets/rooms/3dfront-*.glb
+# DiffuScene 배치 + 오픈 가구로 조립한 방 GLB. 커밋하지 않음.
+public/assets/rooms/diffuscene-*.glb
 *.log
 *.zip
 dist/

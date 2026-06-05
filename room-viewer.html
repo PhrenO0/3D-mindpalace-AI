@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>걸어다니는 3D 방 뷰어 — 가구 분리 GLB</title>
+  <!--
+    room-viewer.html — 가구가 객체 단위로 분리된 GLB(3D-FRONT, Infinigen 등)를
+    "걸어다니며" 보는 단독 뷰어. 스캐너(personal-room-scanner-3d.html)와 달리
+    AI 검출 없이, 로드 즉시 방 안에서 좋은 구도로 자동 프레이밍한다.
+      · DRACOLoader: 압축 GLB도 로드
+      · RoomEnvironment(IBL): 3D-FRONT 같은 PBR 재질이 새까맣게 안 보이게
+      · 자동 프레이밍: 카메라를 방 "안쪽"에 놓아(껍데기 바깥 회색박스 방지) 가구를 비춤
+      · 조작: 드래그=둘러보기, 휠=줌, WASD/방향키=걷기, 우측 목록 클릭=그 가구로 이동
+    사용:  /room-viewer.html?glb=public/assets/rooms/3dfront-livingroom.glb
+  -->
+  <style>
+    :root{color-scheme:dark;--panel:rgba(12,16,14,.84);--line:rgba(215,226,218,.2);
+          --text:#f7f3ea;--muted:rgba(247,243,234,.66);--accent:#a9d8c8;--gold:#d6bb70;}
+    *{box-sizing:border-box;}
+    body{margin:0;font-family:"Malgun Gothic","Apple SD Gothic Neo",system-ui,sans-serif;
+         background:#070907;color:var(--text);overflow:hidden;}
+    #scene{position:fixed;inset:0;} canvas{display:block;width:100%;height:100%;}
+    .panel{position:fixed;border:1px solid var(--line);background:var(--panel);
+           backdrop-filter:blur(12px);border-radius:12px;box-shadow:0 18px 50px rgba(0,0,0,.4);}
+    .kicker{color:var(--gold);font-size:11px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;}
+    .top{top:16px;left:16px;width:min(360px,calc(100vw - 32px));padding:14px 16px;}
+    .top h1{margin:6px 0 6px;font-size:clamp(16px,2.2vw,21px);}
+    .top p{margin:0;color:var(--muted);font-size:12px;line-height:1.55;}
+    .status{margin-top:10px;padding:9px 11px;border-radius:8px;background:rgba(0,0,0,.32);
+            color:var(--muted);font-size:12px;border:1px solid var(--line);white-space:pre-line;}
+    .status b{color:var(--accent);}
+    .side{top:16px;right:16px;width:min(280px,calc(100vw - 32px));padding:14px 16px;
+          max-height:calc(100vh - 32px);overflow:auto;}
+    .side h2{margin:2px 0 8px;font-size:15px;}
+    .row{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;
+         padding:7px 10px;border:1px solid var(--line);border-radius:8px;cursor:pointer;
+         font-size:13px;margin-bottom:6px;}
+    .row:hover,.row.active{border-color:var(--accent);background:rgba(169,216,200,.12);}
+    .row .t{font-size:10px;color:var(--muted);font-variant-numeric:tabular-nums;}
+    .hint{position:fixed;left:16px;bottom:14px;color:var(--muted);font-size:11px;
+          background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 11px;}
+    .hint b{color:var(--accent);}
+  </style>
+  <script type="importmap">
+    { "imports":{
+      "three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    } }
+  </script>
+</head>
+<body>
+  <div id="scene"></div>
+  <section class="panel top">
+    <div class="kicker">Walkable Room Viewer</div>
+    <h1>걸어다니는 3D 방</h1>
+    <p>가구가 객체 단위로 분리된 GLB를 방 안에서 둘러봅니다. 드래그·휠·WASD로 이동.</p>
+    <div class="status" id="status">방 로드 중…</div>
+  </section>
+  <aside class="panel side" id="side" style="display:none">
+    <div class="kicker">가구 (개별 객체)</div>
+    <h2 id="count">—</h2>
+    <div id="list"></div>
+  </aside>
+  <div class="hint">드래그=둘러보기 · 휠=줌 · <b>WASD/방향키=걷기</b> · 목록 클릭=가구로 이동</div>
+
+  <script type="module">
+    import * as THREE from "three";
+    import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+    import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
+    import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+    import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+
+    const $ = id => document.getElementById(id);
+    const setStatus = h => $("status").innerHTML = h;
+    const DEFAULT_GLB = "public/assets/rooms/3dfront-livingroom.glb";
+    const ROOM_GLB = new URLSearchParams(location.search).get("glb") || DEFAULT_GLB;
+
+    const sceneEl = $("scene");
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0b0f0d);
+    const camera = new THREE.PerspectiveCamera(62, innerWidth/innerHeight, 0.02, 500);
+    const renderer = new THREE.WebGLRenderer({ antialias:true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio||1, 1.6));
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.25;   // 어두운 3D-FUTURE 재질이 묻히지 않게 노출↑
+    sceneEl.appendChild(renderer.domElement);
+
+    // 환경맵(IBL): PBR 재질(3D-FRONT 등)이 환경 반사 없이 새까맣게 보이는 것을 막는다.
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    // 조명 보강: IBL만으로 부족한 그림자부를 채워 검은 가구를 줄인다.
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x404846, 0.9));
+    const keyLight = new THREE.DirectionalLight(0xffffff, 1.1);
+    keyLight.position.set(3, 6, 4);
+    scene.add(keyLight);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.25));
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
+
+    const loader = new GLTFLoader();
+    const draco = new DRACOLoader();
+    draco.setDecoderPath("https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/libs/draco/");
+    loader.setDRACOLoader(draco);
+
+    const FURN_RE = /Factory|Sofa|Cabinet|Table|Chair|Bed|Lighting|Desk|Shelf|Lamp|Plant|Stand|Bookcase|Wardrobe|Stool|Couch/i;
+    let bounds = new THREE.Box3();
+    let furniture = [];   // {name, mesh, center}
+
+    loader.load(ROOM_GLB, (gltf) => {
+      const model = gltf.scene;
+      // 정규화: 가로 최대 7.2, 바닥 y=0, 중심 원점
+      const box = new THREE.Box3().setFromObject(model);
+      const size = box.getSize(new THREE.Vector3());
+      const center = box.getCenter(new THREE.Vector3());
+      const scale = 7.2 / Math.max(size.x, size.z, 0.001);
+      model.scale.setScalar(scale);
+      model.position.set(-center.x*scale, -box.min.y*scale, -center.z*scale);
+      model.traverse(c => {
+        if (!c.isMesh) return;
+        const mats = Array.isArray(c.material)?c.material:[c.material];
+        mats.forEach(m => {
+          if (!m) return;
+          m.side = THREE.DoubleSide;
+          // 어두운 3D-FUTURE PBR 재질이 새까맣게 보이는 문제 보정:
+          //  · 과한 금속성↓(금속은 IBL이 약하면 검게 죽음)  · 거칠기 하한↑(거울 반사로 검어지는 것 방지)
+          //  · 환경맵 반사 강도↑  · 텍스처 없는 거의-검은 baseColor만 살짝 끌어올림(텍스처는 건드리지 않음)
+          if ("metalness" in m) m.metalness = Math.min(m.metalness, 0.1);
+          if ("roughness" in m) m.roughness = Math.max(m.roughness ?? 0.5, 0.6);
+          if ("envMapIntensity" in m) m.envMapIntensity = 1.4;
+          if (m.color && !m.map) {
+            const hsl = {}; m.color.getHSL(hsl);
+            if (hsl.l < 0.22) m.color.setHSL(hsl.h, hsl.s, 0.32);
+          }
+          m.needsUpdate = true;
+        });
+        if (c.name && FURN_RE.test(c.name) && !/^None/i.test(c.name)) {
+          const b = new THREE.Box3().setFromObject(c);
+          furniture.push({ name: prettyName(c.name), raw:c.name, mesh:c, center:b.getCenter(new THREE.Vector3()) });
+        }
+      });
+      scene.add(model);
+      bounds = new THREE.Box3().setFromObject(model);
+      frameInside();
+      buildList();
+      setStatus(`로드 완료 · 가구 <b>${furniture.length}</b>개(개별 객체) · 파일: ${ROOM_GLB.split("/").pop()}`);
+    }, (e) => {
+      if (e.total) setStatus(`방 로드 중… ${Math.round(e.loaded/e.total*100)}%`);
+    }, (err) => {
+      console.error(err);
+      setStatus("GLB 로드 실패: " + (err?.message||err));
+    });
+
+    // 사람이 읽기 쉬운 이름: "Sofa_2d8e..._4.obj" → "Sofa"
+    function prettyName(n){
+      const KO = {Sofa:"소파",Couch:"소파",Cabinet:"수납장",Shelf:"선반",Desk:"책상",Table:"테이블",
+        Chair:"의자",Bed:"침대",Lighting:"조명",Lamp:"조명",Plant:"화분",Wardrobe:"옷장",
+        Bookcase:"책장",Stool:"스툴",Stand:"거치대"};
+      const head = String(n).split(/[_(]/)[0].replace(/Factory.*/,"");
+      const key = Object.keys(KO).find(k => new RegExp(k,"i").test(head));
+      return key ? `${KO[key]} (${head})` : head || n;
+    }
+
+    // 카메라를 방 "안쪽" 한 모서리 위에 놓고 가구 중심을 바라본다(껍데기 바깥 회색박스 방지).
+    function frameInside(){
+      const sz = bounds.getSize(new THREE.Vector3());
+      const fb = new THREE.Box3();
+      furniture.forEach(f => fb.expandByObject(f.mesh));
+      const fc = furniture.length ? fb.getCenter(new THREE.Vector3()) : bounds.getCenter(new THREE.Vector3());
+      camera.position.set(bounds.min.x + sz.x*0.18, bounds.min.y + sz.y*0.82, bounds.max.z - sz.z*0.18);
+      controls.target.set(fc.x, bounds.min.y + sz.y*0.22, fc.z);
+      controls.update();
+    }
+
+    function buildList(){
+      if (!furniture.length) return;
+      $("side").style.display = "";
+      $("count").textContent = `${furniture.length}개`;
+      const el = $("list"); el.innerHTML = "";
+      // 같은 종류는 하나로 묶어 카운트 표시
+      const groups = {};
+      furniture.forEach(f => { const k = f.name; (groups[k] ||= []).push(f); });
+      Object.entries(groups).forEach(([name, items]) => {
+        const row = document.createElement("div");
+        row.className = "row";
+        const nm = document.createElement("span"); nm.textContent = name;          // GLB 이름 → textContent(XSS 방지)
+        const ct = document.createElement("span"); ct.className = "t";
+        ct.textContent = items.length > 1 ? items.length + "개" : "1";
+        row.append(nm, ct);
+        row.onclick = () => focusOn(items[0]);
+        el.appendChild(row);
+      });
+    }
+
+    function focusOn(f){
+      const b = new THREE.Box3().setFromObject(f.mesh);
+      const c = b.getCenter(new THREE.Vector3());
+      const d = Math.max(b.getSize(new THREE.Vector3()).length(), 0.8);
+      camera.position.set(c.x + d*1.1, c.y + d*0.5, c.z + d*1.1);
+      controls.target.copy(c); controls.update();
+      document.querySelectorAll(".row").forEach(r=>r.classList.remove("active"));
+    }
+
+    // ── WASD/방향키로 "걷기": 카메라와 타깃을 같이 평행이동 ──
+    const keys = {};
+    addEventListener("keydown", e => keys[e.key.toLowerCase()] = true);
+    addEventListener("keyup",   e => keys[e.key.toLowerCase()] = false);
+    function walk(dt){
+      const speed = 2.2 * dt;
+      const fwd = new THREE.Vector3(); camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
+      const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0,1,0)).normalize();
+      const move = new THREE.Vector3();
+      if (keys["w"]||keys["arrowup"])    move.add(fwd);
+      if (keys["s"]||keys["arrowdown"])  move.sub(fwd);
+      if (keys["d"]||keys["arrowright"]) move.add(right);
+      if (keys["a"]||keys["arrowleft"])  move.sub(right);
+      if (move.lengthSq()){
+        move.normalize().multiplyScalar(speed);
+        camera.position.add(move); controls.target.add(move);
+      }
+    }
+
+    let prev = performance.now();
+    function tick(now){
+      const dt = Math.min((now - prev)/1000, 0.05); prev = now;
+      walk(dt);
+      controls.update();
+      renderer.render(scene, camera);
+      requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+    addEventListener("resize", () => {
+      camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth, innerHeight);
+    });
+  </script>
+</body>
+</html>

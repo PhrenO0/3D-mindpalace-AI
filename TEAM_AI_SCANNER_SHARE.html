@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI 방 인식 → 기억궁전 자동 생성 · 팀 공유</title>
+  <!--
+    팀 공유용 정적 페이지. 더블클릭(file://)으로 열면 된다.
+    원리 → 작업물 → 결과 → 현재 상태(솔직) → 직접 열어보기 → 다음 단계.
+    상세 설명서는 AI_ROOM_SCANNER_GUIDE.md.
+  -->
+  <style>
+    :root{
+      --bg:#0a0d0c; --panel:#11161300; --card:rgba(18,24,21,.72);
+      --line:rgba(215,226,218,.16); --text:#f4f1e9; --muted:#aeb8b1;
+      --accent:#a9d8c8; --gold:#d6bb70; --warn:#e6b364; --ok:#92d6b4;
+    }
+    *{box-sizing:border-box;}
+    body{
+      margin:0; color:var(--text);
+      font-family:"Pretendard","Malgun Gothic","Apple SD Gothic Neo",system-ui,sans-serif;
+      background:
+        radial-gradient(1100px 540px at 78% -8%, #16241f 0%, transparent 60%),
+        radial-gradient(900px 500px at 0% 12%, #131d22 0%, transparent 55%),
+        var(--bg);
+      line-height:1.6;
+    }
+    .wrap{max-width:1040px; margin:0 auto; padding:34px 22px 70px;}
+    .kicker{color:var(--gold); font-size:12px; font-weight:800; letter-spacing:.12em; text-transform:uppercase;}
+    h1{font-size:clamp(26px,4vw,40px); margin:10px 0 8px; line-height:1.12;}
+    h2{font-size:clamp(19px,2.6vw,24px); margin:0 0 4px;}
+    .lead{color:var(--muted); font-size:15px; max-width:760px;}
+    section{margin-top:30px;}
+    .card{
+      border:1px solid var(--line); background:var(--card); border-radius:14px;
+      padding:20px 22px; box-shadow:0 16px 44px rgba(0,0,0,.34);
+      -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px);
+    }
+    .big-quote{
+      border-left:3px solid var(--accent); padding:6px 0 6px 16px; margin:8px 0 0;
+      font-size:18px; font-weight:700;
+    }
+    .big-quote span{color:var(--accent);}
+    .grid2{display:grid; grid-template-columns:1fr 1fr; gap:16px;}
+    .grid3{display:grid; grid-template-columns:repeat(3,1fr); gap:14px;}
+    @media(max-width:760px){ .grid2,.grid3{grid-template-columns:1fr;} }
+
+    /* 파이프라인 흐름 */
+    .flow{display:flex; flex-wrap:wrap; gap:8px; align-items:stretch; margin-top:6px;}
+    .step{
+      flex:1 1 130px; min-width:130px; border:1px solid var(--line); border-radius:10px;
+      padding:11px 12px; background:rgba(255,255,255,.03); position:relative;
+    }
+    .step b{display:block; color:var(--accent); font-size:13px; margin-bottom:3px;}
+    .step span{color:var(--muted); font-size:12px;}
+    .arrow{align-self:center; color:var(--gold); font-weight:900; font-size:18px;}
+
+    table{width:100%; border-collapse:collapse; margin-top:6px; font-size:13.5px;}
+    th,td{border:1px solid var(--line); padding:9px 11px; text-align:left; vertical-align:top;}
+    th{background:rgba(169,216,200,.08); color:var(--text); font-weight:800;}
+    td .tag{color:var(--accent); font-weight:700;}
+
+    figure{margin:0;}
+    figure img{width:100%; border-radius:10px; border:1px solid var(--line); display:block;}
+    figcaption{color:var(--muted); font-size:12.5px; margin-top:7px;}
+    figcaption b{color:var(--text);}
+
+    .status-col h3{margin:0 0 8px; font-size:15px;}
+    .ok h3{color:var(--ok);} .warn h3{color:var(--warn);}
+    ul{margin:6px 0 0; padding-left:18px;}
+    li{margin:4px 0; font-size:13.5px; color:var(--muted);}
+    li b{color:var(--text);}
+
+    .links{display:flex; flex-wrap:wrap; gap:10px; margin-top:6px;}
+    .btn{
+      display:inline-flex; align-items:center; gap:8px; text-decoration:none;
+      border:1px solid rgba(169,216,200,.4); border-radius:10px; padding:11px 15px;
+      color:var(--text); font-weight:800; font-size:14px; background:rgba(169,216,200,.08);
+    }
+    .btn:hover{background:rgba(169,216,200,.18);}
+    .btn small{color:var(--muted); font-weight:600; font-size:12px;}
+    .pill{display:inline-block; font-size:11px; font-weight:800; padding:2px 8px; border-radius:999px;}
+    .pill.proto{background:rgba(230,179,100,.16); color:var(--warn); border:1px solid rgba(230,179,100,.4);}
+    .foot{margin-top:34px; color:var(--muted); font-size:12px; text-align:center;}
+    .note{color:var(--muted); font-size:12.5px; margin-top:8px;}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+
+    <header>
+      <div class="kicker">3D 팀 · 내부 공유</div>
+      <h1>내 방 사진/3D를 올리면 <span style="color:var(--accent)">AI가 가구를 인식해</span><br>기억궁전 핫스팟을 자동으로 찍는다</h1>
+      <p class="lead">
+        지금까지는 내가 <b>손으로</b> 가구를 보고 좌표를 찍어 기억 지점을 만들었습니다.
+        이번에 그 과정을 <b>AI(객체검출) + 레이캐스트(좌표 측정)</b>로 자동화했습니다.
+        <b>Claude·외부 AI 서버 없이</b> 브라우저 안에서 전부 돌고, 정적 서버/VM에서 스스로 작동합니다.
+        <span class="pill proto">프로토타입</span>
+      </p>
+    </header>
+
+    <!-- 핵심 원리 -->
+    <section class="card">
+      <div class="kicker">한 문장 원리</div>
+      <p class="big-quote">3D 핫스팟은 결국 <span>“3D 좌표 하나(x,y,z)”</span>일 뿐.<br>
+        모든 작업은 “화면에 보이는 저 소파가 <span>공간 어디</span>에 있는가”를 알아내는 문제였다.</p>
+      <p class="note">그 좌표를 알아내는 유일한 다리가 <b>레이캐스트</b>입니다 —
+        화면의 한 점에서 광선을 쏴, 처음 부딪힌 표면의 3D 좌표를 읽습니다.
+        손으로 할 땐 내가 눈으로 그 점을 찍었고, 자동화에선 <b>AI 검출 박스</b>가 그 점을 줍니다.</p>
+    </section>
+
+    <!-- 파이프라인 -->
+    <section>
+      <h2>어떤 원리로 만드나 (파이프라인)</h2>
+      <p class="lead">3D GLB가 입력일 때의 전체 흐름. 각 단계엔 “왜 그렇게 했는지” 이유가 붙어 있습니다.</p>
+      <div class="card" style="margin-top:10px;">
+        <div class="flow">
+          <div class="step"><b>① GLB 로드·정규화</b><span>어떤 크기 방이든 같은 기준(가로7.2·바닥0)으로</span></div>
+          <div class="arrow">→</div>
+          <div class="step"><b>② 관찰 지점 격자</b><span>한 점이면 칸막이벽에 막힘 → 각 방 안에서 둘러봄</span></div>
+          <div class="arrow">→</div>
+          <div class="step"><b>③ 다방향 렌더</b><span>각 지점 4방향을 이미지로 캡처</span></div>
+          <div class="arrow">→</div>
+          <div class="step"><b>④ AI 객체검출</b><span>개방어휘(OWL-ViT): 찾을 가구 단어만 검색</span></div>
+          <div class="arrow">→</div>
+          <div class="step"><b>⑤ 레이캐스트</b><span>박스 여러 점을 실제 형상에 쏴 정확한 3D 좌표</span></div>
+          <div class="arrow">→</div>
+          <div class="step"><b>⑥ 합의·중복제거</b><span>여러 각도에서 반복 검출된 것만 채택(유령 제거)</span></div>
+          <div class="arrow">→</div>
+          <div class="step"><b>⑦ 개념 매핑·마커</b><span>규칙으로 조선 개념 배정 → 3D 마커 + JSON</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3가지 접근 -->
+    <section>
+      <h2>핵심은 “화면점을 누가 주느냐”</h2>
+      <p class="lead">레이캐스트 공식은 늘 같고, 자동화 단계는 ‘화면의 어느 점을 쏠지 누가 정하나’로만 갈립니다.</p>
+      <table>
+        <tr><th>방법</th><th>화면점 제공</th><th>깊이</th><th>정확도</th></tr>
+        <tr><td><span class="tag">① 손 (room-03)</span></td><td>내가 눈으로 클릭</td><td>실제 레이캐스트</td><td>정확하지만 수동</td></tr>
+        <tr><td><span class="tag">② 2D 사진 스캐너</span></td><td>AI 검출 박스 + 깊이추정</td><td>AI가 <i>추정</i></td><td>대략적(2.5D)</td></tr>
+        <tr><td><span class="tag">③ 3D GLB 스캐너</span></td><td>AI 검출 박스 + 실제 레이캐스트</td><td>실제 <i>측정</i></td><td><b style="color:var(--ok)">정확 ★</b></td></tr>
+      </table>
+    </section>
+
+    <!-- 결과물 -->
+    <section>
+      <h2>작업물 · 결과</h2>
+      <div class="grid2" style="margin-top:10px;">
+        <figure class="card">
+          <img src="public/screenshots/share-manual-room03.jpeg" alt="손으로 만든 기억의 방" />
+          <figcaption><b>① 원본 — 손으로 만든 기억의 방 (room-03)</b><br>
+            내가 레이캐스트로 가구 좌표를 찍어 7개 핫스팟을 배치. 이 자동화의 출발점.</figcaption>
+        </figure>
+        <figure class="card">
+          <img src="public/screenshots/share-ai-scanner3d.jpeg" alt="AI 3D 스캐너 결과" />
+          <figcaption><b>② AI 3D 스캐너 — 자동 인식 결과</b><br>
+            GLB를 8개 지점에서 스캔 → 책상·소파·옷장·싱크대를 인식해 3D 마커 자동 배치.
+            아파트 전체에 분산(과거엔 거실에만 뭉침).</figcaption>
+        </figure>
+      </div>
+      <p class="note">두 스캐너 모두 결과를 <b>JSON</b>으로 내보내며, 기존 방 시스템의
+        <code>ROOM_HOTSPOTS</code> 구조와 호환됩니다(3D 좌표 포함).</p>
+    </section>
+
+    <!-- v2: Azure & occlusion -->
+    <section>
+      <h2>v2 — Azure 검출 & occlusion 해결</h2>
+      <div class="grid2" style="margin-top:10px;">
+        <div class="card">
+          <div class="kicker">하이브리드: 인식=Azure · 위치=클라이언트</div>
+          <p class="note" style="margin-top:8px;">검출은 거대 학습된 <b>Azure AI Vision</b>이, 정확한 3D 좌표는
+            형상이 손에 있는 <b>클라이언트 레이캐스트</b>가 맡는다. (키는 백엔드 프록시로 보호, 없으면 브라우저 폴백)</p>
+          <table style="margin-top:6px;">
+            <tr><th>가구</th><th>브라우저 OWL-ViT</th><th>Azure AI Vision</th></tr>
+            <tr><td>의자/식탁/싱크대/TV/소파</td><td>14~35% (노이즈)</td>
+              <td><b style="color:var(--ok)">84 / 73 / 69 / 59 / 56%</b></td></tr>
+          </table>
+        </div>
+        <figure class="card">
+          <img src="public/screenshots/share-azure-v2.jpeg" alt="Azure v2 결과" />
+          <figcaption><b>Azure 검출 + 삼각측량 결과</b><br>
+            식탁·소파·TV를 인식해 3D 마커 배치. 상태표시줄에 "검출기: Azure AI Vision".</figcaption>
+        </figure>
+      </div>
+      <div class="card" style="margin-top:14px;">
+        <div class="kicker">occlusion 해결 — 표면 말고 "광선 교차점"</div>
+        <p class="note" style="margin-top:8px;">
+          문틈 너머 가구는 광선이 <b>중간 벽에 먼저 맞아</b> 마커가 벽에 박혔다.
+          → 표면을 맞히지 말고 <b>여러 시점 광선이 수렴하는 점</b>을 삼각측량하면 가림과 무관하게
+          진짜 위치가 나온다. 같은 사물 묶기도 표면이 아닌 <b>광선끼리 수렴</b>으로 판정.
+          <b style="color:var(--ok)">실측: 의자가 6개 광선으로 정확히 수렴.</b>
+        </p>
+      </div>
+    </section>
+
+    <!-- 현재 상태 (솔직) -->
+    <section>
+      <h2>지금 상태 (솔직하게)</h2>
+      <div class="grid2" style="margin-top:10px;">
+        <div class="card status-col ok">
+          <h3>✅ 되는 것 (검증됨)</h3>
+          <ul>
+            <li>광화문 지도·한옥·GPS마커·방 핫스팟이 <b>서버 없이 더블클릭</b>으로 동작</li>
+            <li>스캐너 <b>end-to-end</b>: 로드→스캔→검출→3D좌표→마커→JSON</li>
+            <li><b>Azure 검출 압도적</b>(의자 84%, 식탁 73% …) — 폴백 OWL-ViT와 차원 다름</li>
+            <li><b>occlusion 해결</b> — 다시점 광선 삼각측량(의자 6광선 수렴 확인)</li>
+            <li>자동 테스트 8개 통과</li>
+          </ul>
+        </div>
+        <div class="card status-col warn">
+          <h3>⚠️ 아직 불안정 (개선 중)</h3>
+          <ul>
+            <li><b>Azure 라벨 혼동</b> — 합성 렌더에서 침대를 "식탁"으로 오인식 등
+              (삼각측량은 그 사물에 정확히 박지만 개념 매핑이 틀어짐)</li>
+            <li><b>사물당 광선 부족</b> — 삼각측량엔 2시점↑ 필요하나 Azure 무료티어 분당 20콜 제한</li>
+            <li>닫힌 셸형 분위기 스캔은 인식·조망 약함</li>
+            <li>다지점 추론이라 저사양에서 20~30초</li>
+          </ul>
+        </div>
+      </div>
+      <p class="note">→ 이 도구는 <b>프로토타입</b>입니다. 위 약점은 알려진 것이며, 아래 로드맵으로 개선 예정.</p>
+    </section>
+
+    <!-- 직접 열어보기 -->
+    <section>
+      <h2>직접 열어보기</h2>
+      <p class="lead">아래 파일을 브라우저로 여세요. (3D 지도/스캐너는 정적 서버 권장: <code>npm run dev</code> 또는 <code>python -m http.server</code>)</p>
+      <div class="links">
+        <a class="btn" href="personal-room-scanner-3d.html">🧠 3D GLB 스캐너<br><small>방 GLB → 자동 핫스팟</small></a>
+        <a class="btn" href="personal-room-scanner.html">📷 2D 사진 스캐너<br><small>방 사진 → 자동 핫스팟</small></a>
+        <a class="btn" href="room-03-sejong.html">🏛️ 원본 기억의 방<br><small>손으로 만든 기준</small></a>
+        <a class="btn" href="PROJECT_SHARE_OVERVIEW.md">📑 전체 공유 문서<br><small>작업 흐름·암묵지 총정리</small></a>
+        <a class="btn" href="AI_ROOM_SCANNER_GUIDE.md">📄 원리 설명서<br><small>핫스팟·레이캐스트</small></a>
+        <a class="btn" href="AI_SCANNER_V2_AZURE_GUIDE.md">📄 v2 설명서<br><small>Azure·occlusion</small></a>
+      </div>
+    </section>
+
+    <!-- 다음 단계 -->
+    <section class="card">
+      <div class="kicker">다음 단계 (개선 로드맵)</div>
+      <div class="grid3" style="margin-top:10px;">
+        <div><b style="color:var(--accent)">1. 검출 강화</b><br><span class="note">더 강한 개방어휘 모델, 렌더 품질·시점 튜닝</span></div>
+        <div><b style="color:var(--accent)">2. 위치 정밀화</b><br><span class="note">3D 인스턴스 분할(OpenMask3D 류)로 사물 단위 정확화</span></div>
+        <div><b style="color:var(--accent)">3. 핀 드래그 보정</b><br><span class="note">사용자가 어긋난 마커를 끌어 직접 수정</span></div>
+        <div><b style="color:var(--accent)">4. LLM 개념 매핑(옵션)</b><br><span class="note">검출 목록을 LLM에 줘 더 자연스러운 배정</span></div>
+        <div><b style="color:var(--accent)">5. 3D 스캔 업로드</b><br><span class="note">Polycam 등 → 진짜 걸어다니는 개인화 방</span></div>
+      </div>
+    </section>
+
+    <p class="foot">3D 팀 · AI 방 인식 프로토타입 · 상세는 AI_ROOM_SCANNER_GUIDE.md 참고 · 작성 2026-06-04</p>
+  </div>
+</body>
+</html>

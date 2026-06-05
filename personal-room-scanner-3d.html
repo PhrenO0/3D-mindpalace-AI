@@ -1,0 +1,1041 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>3D 방(GLB) → 기억궁전 자동 스캔 (서버리스 AI)</title>
+  <!--
+    ============================================================================
+    personal-room-scanner-3d.html
+    ----------------------------------------------------------------------------
+    2D 사진 스캐너(personal-room-scanner.html)의 "3D GLB 입력" 버전.
+
+    왜 3D가 더 정확한가:
+      - 2D 사진: 깊이를 AI로 "추정"한다 → 위치가 대략적(2.5D).
+      - 3D GLB : 실제 형상이 있으니 깊이가 "정확"하다.
+                 그래서 AI는 "무엇이 어디(화면상)"만 맡고,
+                 정확한 3D 좌표는 레이캐스트로 직접 읽는다.
+
+    파이프라인:
+      ① GLB를 Three.js에 로드(여러 각도로 볼 수 있게)
+      ② 카메라를 N각도로 돌려가며 매 프레임을 렌더 → 캔버스 이미지로 캡처
+      ③ 각 프레임에 객체검출(DETR) 실행 → 화면상 사물 박스
+      ④ 박스 중심에서 "실제 GLB 메쉬로 레이캐스트" → 진짜 3D 좌표
+         (★ 이게 내가 손으로 하던 __roomCalib.probe 의 자동화 ★)
+      ⑤ 여러 각도 결과를 3D 거리로 중복 제거 → 방 전체 사물 목록
+      ⑥ 규칙 기반으로 조선 개념 매핑 → 3D 공간에 번호 마커 배치
+
+    제약(2D 버전과 동일):
+      - Claude API / 세션 의존 0. 모든 추론은 브라우저(transformers.js)에서.
+      - 정적 파일만 서빙하면 VM에서 스스로 동작(server.mjs / python http.server).
+    ============================================================================
+  -->
+  <style>
+    :root { color-scheme: dark; --panel: rgba(12,16,14,.84); --line: rgba(215,226,218,.2);
+            --text:#f7f3ea; --muted: rgba(247,243,234,.66); --accent:#a9d8c8; --gold:#d6bb70; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family:"Malgun Gothic","Apple SD Gothic Neo",system-ui,sans-serif;
+           background:#070907; color:var(--text); overflow:hidden; }
+    #scene { position:fixed; inset:0; }
+    canvas { display:block; width:100%; height:100%; }
+
+    .panel { position:fixed; border:1px solid var(--line); background:var(--panel);
+             backdrop-filter:blur(12px); border-radius:12px; box-shadow:0 18px 50px rgba(0,0,0,.4); }
+    .kicker { color:var(--gold); font-size:11px; font-weight:800; letter-spacing:.09em; text-transform:uppercase; }
+
+    .top { top:16px; left:16px; width:min(420px,calc(100vw - 32px)); padding:16px 18px; }
+    .top h1 { margin:6px 0 6px; font-size:clamp(18px,2.4vw,24px); }
+    .top p { margin:0; color:var(--muted); font-size:12px; line-height:1.5; }
+    .controls { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+    button, .filebtn { border:1px solid rgba(230,236,231,.3); border-radius:8px; background:rgba(255,255,255,.06);
+             color:var(--text); padding:9px 12px; font:inherit; font-weight:800; cursor:pointer; }
+    button:hover:not(:disabled), .filebtn:hover { border-color:var(--accent); background:rgba(169,216,200,.14); }
+    button:disabled { opacity:.45; cursor:not-allowed; }
+    button.primary { background:rgba(169,216,200,.18); border-color:rgba(169,216,200,.6); }
+    .status { margin-top:12px; padding:10px 12px; border-radius:8px; background:rgba(0,0,0,.32);
+              color:var(--muted); font-size:12px; line-height:1.5; white-space:pre-line; border:1px solid var(--line); }
+    .status b { color:var(--accent); }
+
+    .side { top:16px; right:16px; width:min(340px,calc(100vw - 32px)); padding:16px 18px; max-height:calc(100vh - 32px); overflow:auto; }
+    .side h2 { margin:4px 0; font-size:20px; }
+    .side .obj { color:var(--accent); font-weight:800; font-size:13px; }
+    .side p { color:var(--muted); font-size:13px; line-height:1.5; margin:8px 0 0; }
+    .list { margin-top:12px; display:grid; gap:6px; }
+    .row { display:grid; grid-template-columns:24px 1fr auto; gap:8px; align-items:center;
+           padding:8px 10px; border:1px solid var(--line); border-radius:8px; cursor:pointer; font-size:13px; }
+    .row:hover, .row.active { border-color:var(--accent); background:rgba(169,216,200,.1); }
+    .row .n { color:var(--gold); font-weight:900; text-align:center; }
+    .row .conf { color:var(--muted); font-size:11px; }
+    .hint { color:var(--muted); font-size:11px; line-height:1.5; margin-top:10px; }
+    .hide { display:none; }
+
+    /* AI 검출 결과 패널 (왼쪽 아래) */
+    .detect { left:16px; bottom:16px; width:min(360px,calc(100vw - 32px)); padding:14px 16px; max-height:46vh; overflow:auto; }
+    .dlist { margin-top:10px; display:grid; gap:6px; }
+    .drow { display:grid; grid-template-columns:14px 1fr auto auto; gap:9px; align-items:center;
+            padding:7px 10px; border:1px solid var(--line); border-radius:8px; font-size:13px; cursor:pointer; }
+    .drow:hover { border-color:var(--accent); background:rgba(169,216,200,.1); }
+    .drow .swatch { width:11px; height:11px; border-radius:50%; }
+    .drow .name { font-weight:700; }
+    .drow .pct { color:var(--accent); font-weight:800; font-variant-numeric:tabular-nums; }
+    .drow .tri { font-size:10px; padding:2px 6px; border-radius:999px; white-space:nowrap; }
+    .drow .tri.ok { color:var(--ok); border:1px solid rgba(146,214,180,.5); }
+    .drow .tri.weak { color:var(--warn); border:1px solid rgba(230,179,100,.45); }
+  </style>
+  <!-- 방 GLB data:URI(있으면 file://에서도 동작). 없으면 http 상대경로 GLB 사용. -->
+  <script src="public/room03-glb-datauri.local.js" onerror="this.remove()"></script>
+</head>
+<body>
+  <div id="scene"></div>
+
+  <section class="panel top">
+    <div class="kicker">Serverless AI · 3D GLB 방 인식</div>
+    <h1>3D 방(GLB) 자동 스캔</h1>
+    <p>GLB 방을 불러와 여러 각도에서 AI가 가구를 인식하고, 실제 형상에 레이캐스트해
+       <b>정확한 3D 위치</b>에 기억 핫스팟을 자동 배치합니다. 추론은 전부 브라우저에서.</p>
+    <div class="controls">
+      <label class="filebtn">GLB 불러오기<input id="fileInput" type="file" accept=".glb,model/gltf-binary" hidden /></label>
+      <button id="scanBtn" class="primary" disabled>AI로 방 스캔</button>
+      <button id="exportBtn" disabled>핫스팟 JSON</button>
+      <button id="raysBtn" disabled>광선 보기</button>
+    </div>
+    <div class="status" id="status">기본 방(밀라노 GLB)을 불러오는 중…</div>
+  </section>
+
+  <aside class="panel side hide" id="sidePanel">
+    <div class="kicker">선택된 기억 지점</div>
+    <h2 id="cTitle">—</h2>
+    <div class="obj" id="cObject"></div>
+    <p id="cSummary"></p>
+    <p id="cCue"></p>
+    <div class="list" id="list"></div>
+    <p class="hint">마우스 드래그=회전 · 휠=줌. 번호 마커나 목록을 눌러 개념을 확인하세요.
+       JSON은 3D 좌표(markerPosition)를 포함해 방 시스템에 바로 꽂힙니다.</p>
+  </aside>
+
+  <aside class="panel detect hide" id="detectPanel">
+    <div class="kicker">AI가 인식한 사물 (전체)</div>
+    <div class="dlist" id="detectList"></div>
+    <p class="hint">라벨은 평소 숨김 — <b>점에 마우스를 올리거나(호버)</b> 행/점을 <b>클릭</b>하면 그 사물 라벨이 뜨고 카메라가 이동합니다.
+       <b>광선 N</b> = N개 시점에서 봄 · <span style="color:var(--ok)">2↑ 삼각측량</span>(위치 신뢰↑) / <span style="color:var(--warn)">1 단일시점</span>(위치 흔들림).</p>
+  </aside>
+
+  <script type="importmap">
+    { "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    } }
+  </script>
+
+  <script type="module">
+    import * as THREE from "three";
+    import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+    import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
+    import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+    import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+    import { pipeline, env } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3";
+    env.allowLocalModels = false;
+
+    // 개념 매핑(2D 스캐너와 동일한 규칙 표 — LLM/Claude 불필요)
+    const CONCEPTS = [
+      { id:"hanyang", title:"한양 천도", preferred:["__scene__"],
+        summary:"조선은 새 왕조의 질서를 드러내기 위해 한양을 수도로 삼고 도성과 관청의 축을 정비했습니다.",
+        cue:"방 전체를 처음 둘러보는 장면을, 새 수도 한양의 큰 설계도로 기억합니다." },
+      { id:"jeongdojeon", title:"정도전(설계)", preferred:["desk","dining table","chair"],
+        summary:"정도전은 유교 정치 이념과 관료 국가의 밑그림을 제시하며 조선 초기 제도 설계를 이끌었습니다.",
+        cue:"책상·작업 공간을, 국가 운영 원리를 써 내려가는 설계자의 자리로 기억합니다." },
+      { id:"gyeonggukdaejeon", title:"경국대전(법)", preferred:["sofa","bed"],
+        summary:"경국대전은 조선의 통치 체계를 법으로 정리한 상징적 결과물입니다.",
+        cue:"흔들리지 않는 큰 자리를, 오래 지속되는 법과 제도의 안정감으로 연결합니다." },
+      { id:"jiphyeonjeon", title:"집현전(서고)", preferred:["bookshelf","cabinet","wardrobe","refrigerator"],
+        summary:"집현전은 학문 연구와 정책 보좌의 거점으로, 세종 대 지식 생산을 상징합니다.",
+        cue:"자료를 보관하는 가구를, 학자들이 문헌을 쌓아 둔 집현전 서고로 기억합니다." },
+      { id:"hunminjeongeum", title:"훈민정음(빛)", preferred:["window","mirror","lamp"],
+        summary:"훈민정음은 백성이 쉽게 소통하도록 만든 문자 체계로, 세종 대 문화 성취의 핵심입니다.",
+        cue:"빛이 들어오는 창가를, 새 문자가 세상으로 퍼져 나가는 장면으로 기억합니다." },
+      { id:"gwahak", title:"과학 기술", preferred:["television","lamp","stove","sink"],
+        summary:"천문·시간·측량·농업 기술은 세종 대 국가 운영과 생활 개선을 뒷받침했습니다.",
+        cue:"화면·기기·도구를, 앙부일구·측우기 같은 손에 잡히는 기술로 떠올립니다." },
+      { id:"sadaegyorin", title:"사대교린(외교)", preferred:["potted plant"],
+        summary:"조선 전기의 외교는 명과의 사대, 주변국과의 교린으로 국제 질서를 관리했습니다.",
+        cue:"균형을 맞추며 자라는 식물처럼, 외교도 관계의 균형을 잡는 일로 기억합니다." }
+    ];
+    // ── 개방어휘 검출(OWL-ViT)이 "찾을 사물 목록" ──
+    // COCO 80종 고정 대신, 우리가 원하는 가구 단어로만 찾는다.
+    // → "창문·책장" 등 COCO에 없던 것도 잡고, 엉뚱한 분류(어두운 사각형→tv)를 줄인다.
+    const CANDIDATE_LABELS = [
+      "sofa","bed","desk","dining table","chair","window","bookshelf","cabinet",
+      "wardrobe","potted plant","television","lamp","sink","toilet","refrigerator","stove","mirror"
+    ];
+    const KO = { sofa:"소파", bed:"침대", desk:"책상", "dining table":"식탁/테이블", chair:"의자",
+      window:"창문", bookshelf:"책장", cabinet:"수납장", wardrobe:"옷장", "potted plant":"화분",
+      television:"TV/모니터", lamp:"조명", sink:"싱크대", toilet:"변기/도기", refrigerator:"냉장고",
+      stove:"가스레인지", mirror:"거울",
+      vase:"꽃병", bowl:"그릇", cup:"컵", clock:"시계", counter:"카운터", countertop:"카운터",
+      rug:"러그", carpet:"카펫", painting:"그림", "picture frame":"액자", pillow:"쿠션", cushion:"쿠션",
+      bench:"벤치", ottoman:"오토만", curtain:"커튼", blinds:"블라인드" };
+
+    // dense caption 문장에서 사물 명사를 뽑는다(구체적 표현을 앞에 두어 우선 매칭).
+    const CAPTION_NOUNS = [
+      "sofa","couch","armchair","stool","chair","dining table","coffee table","kitchen island","desk","table",
+      "bed","wardrobe","bookshelf","bookcase","cabinet","nightstand","refrigerator","stove","oven","microwave",
+      "sink","toilet","mirror","television","monitor","chandelier","pendant light","light fixture","lamp",
+      "potted plant","houseplant","plant","vase","bowl","cup","clock","window","curtain","blinds","blind",
+      "rug","carpet","painting","picture frame","countertop","counter","cushion","pillow","bench","ottoman"
+    ];
+    const captionNoun = (text) => {
+      const s = String(text||"").toLowerCase();
+      for (const n of CAPTION_NOUNS) if (s.includes(n)) return n;  // 첫(가장 구체적) 매칭
+      return null;
+    };
+
+    const HTTP_GLB = "public/assets/rooms/bilocale_viale_lucania_milano.glb";
+    // ?glb=경로 로 임의의 GLB를 테스트할 수 있다. 없으면 기본 방.
+    const urlGlb = new URLSearchParams(location.search).get("glb");
+    const ROOM_GLB = urlGlb || window.__ROOM03_GLB_DATAURI__ || HTTP_GLB;
+
+    // ---- Three.js 기본 세팅 ----
+    const sceneEl = document.getElementById("scene");
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0b0f0d);
+    const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.05, 200);
+    const renderer = new THREE.WebGLRenderer({ antialias:true, preserveDrawingBuffer:true });
+    // preserveDrawingBuffer:true → toDataURL 로 렌더 프레임을 캡처하려면 필요.
+    renderer.setPixelRatio(Math.min(devicePixelRatio||1, 1.5));
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    // ACES 톤매핑: 밝은 값(특히 조명이 구워진 baked GLB)을 압축해 "하얗게 날아감"을 막는다.
+    // → 과노출 줄어 Azure가 표면·사물을 더 잘 인식.
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 0.95;
+    sceneEl.appendChild(renderer.domElement);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+
+    // 환경맵(IBL): 3D-FRONT 같은 실제 PBR 재질은 환경 반사가 없으면 새까맣게 보인다.
+    // three.js 내장 RoomEnvironment로 이미지 기반 조명을 깔아 모든 GLB가 사실적으로 보이게 한다.
+    const _pmrem = new THREE.PMREMGenerator(renderer);
+    scene.environment = _pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+
+    // 조명은 "적당히"만 더한다. baked GLB(조명이 텍스처에 구워진)에 과하게 얹으면 하얗게 날아가
+    // 오히려 검출이 떨어진다. unlit GLB는 이 정도로도 보인다(+ ACES 톤매핑이 미드톤을 살림).
+    scene.add(new THREE.HemisphereLight(0xfbf6ec, 0x2a332c, 1.2));
+    const dir = new THREE.DirectionalLight(0xffffff, 0.7); dir.position.set(3,6,4); scene.add(dir);
+    const dir2 = new THREE.DirectionalLight(0xffffff, 0.4); dir2.position.set(-3,5,-4); scene.add(dir2);
+
+    const roomGroup = new THREE.Group(); scene.add(roomGroup);
+    // GLB 로더 — Draco 압축 GLB도 읽도록 DRACOLoader 부착(비압축 GLB엔 영향 없음).
+    // Infinigen으로 생성한 방처럼 고폴리 자산은 Draco로 압축해야 웹에서 가볍다(300MB→9MB).
+    const roomLoader = new GLTFLoader();
+    const _draco = new DRACOLoader();
+    _draco.setDecoderPath("https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/libs/draco/");
+    roomLoader.setDRACOLoader(_draco);
+    const roomMeshes = [];
+    const raycaster = new THREE.Raycaster();
+    let roomBounds = new THREE.Box3();
+    let hotspots = [];
+    let markerSprites = [];
+    let activeIndex = 0;
+    // 검출 마커(점)와 라벨 — 라벨은 평소 숨김, 호버/선택 시에만 표시(겹침 방지)
+    let detectSpheres = [];          // 모든 검출 사물의 점(클릭/호버 대상)
+    let hoverCluster = null;         // 마우스가 가까이 있는 사물
+    let selectedCluster = null;      // 클릭/목록선택으로 고정된 사물
+    let detector = null;            // 브라우저 OWL-ViT(폴백)
+    let USE_AZURE = false;          // 서버에 Azure 키가 있으면 true
+    let lastSource = "browser";     // 마지막으로 쓴 검출기(표시용)
+    let scanning = false;           // 스캔 중엔 렌더루프가 카메라를 못 건드리게(광선 정확도)
+
+    const $ = (id)=>document.getElementById(id);
+    const setStatus = (h)=>{ $("status").innerHTML = h; };
+
+    // 서버에 Azure 비전이 설정돼 있는지 물어본다(없거나 file://면 폴백).
+    fetch("/api/vision-config").then(r=>r.json()).then(c=>{ USE_AZURE = !!c.azure; }).catch(()=>{});
+
+    // 검출기마다 라벨 표기가 달라(Azure "couch" / OWL-ViT "sofa"), 공통 단어로 통일한다.
+    const LABEL_ALIAS = {
+      couch:"sofa", sofa:"sofa", loveseat:"sofa", settee:"sofa", seating:"chair",
+      chair:"chair", armchair:"chair", stool:"chair",
+      display:"television",
+      "coffee table":"dining table", "dining table":"dining table", table:"dining table", desk:"desk",
+      bed:"bed", television:"television", tv:"television", monitor:"television", screen:"television",
+      "potted plant":"potted plant", plant:"potted plant", houseplant:"potted plant", flowerpot:"potted plant",
+      bookshelf:"bookshelf", shelf:"bookshelf", bookcase:"bookshelf",
+      cabinet:"cabinet", cupboard:"cabinet", drawer:"cabinet", nightstand:"cabinet",
+      wardrobe:"wardrobe", closet:"wardrobe", window:"window", mirror:"mirror", lamp:"lamp",
+      sink:"sink", toilet:"toilet", refrigerator:"refrigerator", fridge:"refrigerator", stove:"stove", oven:"stove",
+      // dense caption에서 자주 나오는 표현 보강
+      chandelier:"lamp", "pendant light":"lamp", "light fixture":"lamp",
+      blinds:"window", blind:"window", curtain:"window", curtains:"window",
+      houseplant:"potted plant", "kitchen island":"dining table"
+    };
+    // Azure는 "sofa bed", "office chair", "coffee table" 같은 다단어 라벨도 준다.
+    // 정확히 매칭 안 되면 단어별로 쪼개 별칭을 찾는다("sofa bed"→sofa, "office chair"→chair).
+    const normalizeLabel = (l) => {
+      const s = String(l||"").toLowerCase().trim();
+      if (LABEL_ALIAS[s]) return LABEL_ALIAS[s];
+      for (const w of s.split(/\s+/)) if (LABEL_ALIAS[w]) return LABEL_ALIAS[w];
+      return s;
+    };
+    // 개념(CONCEPTS)에 실제로 쓰이는 가구 라벨만 모은 집합.
+    // 변기·"seating" 같은 비매핑 검출에 콜(budget)을 낭비하지 않도록 검출 단계에서 거른다.
+    const USEFUL_LABELS = new Set(CONCEPTS.flatMap(c => c.preferred).filter(l => l !== "__scene__"));
+
+    loadRoom(ROOM_GLB);
+
+    function loadRoom(src) {
+      // 기존 방 제거
+      while (roomGroup.children.length) roomGroup.remove(roomGroup.children[0]);
+      roomMeshes.length = 0;
+      clearMarkers();
+      roomLoader.load(src, (gltf) => {
+        const model = gltf.scene;
+        // bounding box 기준 정규화: 가로 최대를 7.2로, 바닥을 y=0으로.
+        const box = new THREE.Box3().setFromObject(model);
+        const size = box.getSize(new THREE.Vector3());
+        const center = box.getCenter(new THREE.Vector3());
+        const scale = 7.2 / Math.max(size.x, size.z, 0.001);
+        model.scale.setScalar(scale);
+        model.position.set(-center.x*scale, -box.min.y*scale, -center.z*scale);
+        model.traverse((c) => {
+          if (!c.isMesh) return;
+          if (c.material) {
+            const mats = Array.isArray(c.material)?c.material:[c.material];
+            mats.forEach(m => { m.side = THREE.DoubleSide; m.needsUpdate = true; });
+          }
+          roomMeshes.push(c);
+        });
+        roomGroup.add(model);
+        roomBounds = new THREE.Box3().setFromObject(roomGroup);
+        // 카메라를 방이 보이는 위치로
+        const c = roomBounds.getCenter(new THREE.Vector3());
+        camera.position.set(c.x, 1.6, c.z - 5.0);
+        controls.target.set(c.x, 1.2, c.z);
+        controls.update();
+        $("scanBtn").disabled = false;
+        setStatus("방 로드 완료 · <b>AI로 방 스캔</b>을 누르면 여러 각도에서 가구를 인식합니다.\n(모델 첫 로드 시 수십 MB 다운로드)");
+      }, undefined, (err) => {
+        console.error(err);
+        setStatus("GLB 로드 실패: " + (err?.message||err));
+      });
+    }
+
+    // ---- 파일 업로드(사용자 자기 방 GLB) ----
+    $("fileInput").addEventListener("change", (e) => {
+      const f = e.target.files?.[0]; if (!f) return;
+      const url = URL.createObjectURL(f);
+      $("scanBtn").disabled = true;
+      setStatus("업로드한 GLB 로드 중…");
+      loadRoom(url);
+    });
+
+    // ---- AI 모델 지연 로드 ----
+    async function ensureDetector() {
+      if (detector) return;
+      const device = navigator.gpu ? "webgpu" : "wasm";
+      setStatus(`AI 개방어휘 검출 모델 로드 중… (${device.toUpperCase()})\n처음 한 번만 다운로드(수백 MB)되고 이후 캐시.`);
+      // 개방어휘 객체검출(OWL-ViT): "찾을 단어 목록"을 주면 그것만 찾는다.
+      // COCO 고정 분류기(DETR)보다 우리 가구에 맞고 헛검출이 적다.
+      detector = await pipeline("zero-shot-object-detection", "Xenova/owlvit-base-patch32", { device })
+        .catch(() => pipeline("zero-shot-object-detection", "Xenova/owlvit-base-patch32", { device:"wasm" }));
+    }
+
+    // ========================================================================
+    // 핵심: 여러 각도로 렌더 → 검출 → 레이캐스트로 3D 좌표 → 중복 제거 → 핫스팟
+    // ========================================================================
+    // 관찰 지점이 "방 안 열린 공간"인지 검사한다.
+    // (벽 속이나 방 밖에 카메라를 두면 검은 화면이거나 벽만 보여 쓸모없다.)
+    function isVantageValid(pos) {
+      // ① 발밑에 바닥이 있나(아래로 쏴서 3m 안에 표면)
+      raycaster.set(pos, new THREE.Vector3(0, -1, 0));
+      const down = raycaster.intersectObjects(roomMeshes, true)[0];
+      if (!down || down.distance > 3) return false;
+      // ② 사방이 막혀 있나(4방향 중 3개 이상이 0.35m 안이면 벽 속/가구 속)
+      let blocked = 0;
+      for (const d of [[1,0],[-1,0],[0,1],[0,-1]]) {
+        raycaster.set(pos, new THREE.Vector3(d[0], 0, d[1]).normalize());
+        const h = raycaster.intersectObjects(roomMeshes, true)[0];
+        if (h && h.distance < 0.35) blocked++;
+      }
+      return blocked < 3;
+    }
+
+    // [레이캐스트 v2] 검출 박스 안을 격자로 쏴서, "가장 빽빽이 모인 표면 군집"의
+    // 중심을 사물 좌표로 쓴다.
+    //   왜? 박스 한 점만 쏘면 사물 틈으로 빠져 뒤 벽을 맞는다. 여러 점을 쏴도
+    //   일부는 배경/뒤벽을 맞아 흩어진다. 그 흩어진 이상치는 버리고, 한곳에
+    //   뭉친 점들(=실제 사물 표면)만 평균내면 가장자리·뒤벽 오류가 사라진다.
+    function raycastBoxRobust(b) {
+      const fr = [0.32, 0.5, 0.68];          // 박스 안쪽 3x3 = 9점(가장자리 배경 피함)
+      const hits = [];
+      for (const fx of fr) for (const fy of fr) {
+        const sx = b.xmin + (b.xmax - b.xmin) * fx;
+        const sy = b.ymin + (b.ymax - b.ymin) * fy;
+        raycaster.setFromCamera(new THREE.Vector2(sx*2 - 1, -(sy*2 - 1)), camera);
+        const hit = raycaster.intersectObjects(roomMeshes, true)[0];
+        if (hit && hit.distance > 0.25 && hit.distance < 7) hits.push({ p: hit.point.clone(), d: hit.distance });
+      }
+      if (!hits.length) return null;
+      // 검출된 사물 = 박스 안에서 "앞쪽(카메라에 가까운)" 표면이다.
+      //   (먼 사물을 향한 광선 일부는 중간 벽을 맞아 흩어진다 → 그건 버려야 한다.)
+      // 그래서 ① 가장 가까운 깊이를 기준으로, ② 그와 비슷한 깊이(0.4m)인 점들만
+      //   모아 평균낸다 → 앞쪽 사물 표면에 안정적으로 박힌다(뒤벽으로 안 끌림).
+      hits.sort((a, b) => a.d - b.d);
+      const near = hits[0].d;
+      const front = hits.filter(h => h.d - near < 0.4);
+      const c = new THREE.Vector3();
+      front.forEach(h => c.add(h.p));
+      return c.multiplyScalar(1 / front.length);
+    }
+
+    // ── 오큘루션 해결: 다시점 광선 삼각측량 ──────────────────────────────
+    // 박스 중심을 지나는 "광선"(원점+방향)을 만든다. 표면을 맞히지 않는다.
+    function boxCenterRay(b) {
+      const cx = (b.xmin + b.xmax) / 2, cy = (b.ymin + b.ymax) / 2;
+      raycaster.setFromCamera(new THREE.Vector2(cx*2 - 1, -(cy*2 - 1)), camera);
+      return { o: raycaster.ray.origin.clone(), d: raycaster.ray.direction.clone().normalize() };
+    }
+    // 점 p 에서 광선(o,d) 직선까지의 수직 거리(+ 앞쪽인지).
+    function pointRayDistance(o, d, p) {
+      const op = new THREE.Vector3().subVectors(p, o);
+      const t = op.dot(d);                       // t<0 이면 카메라 뒤
+      const proj = d.clone().multiplyScalar(t).add(o);
+      return { dist: p.distanceTo(proj), t };
+    }
+    // 가중 최소제곱: 광선들의 "가장 가까운 공통점". 각 광선의 (I − d·dᵀ)에 가중 w를 실어
+    //   A=Σ w(I−d dᵀ), b=Σ w(I−d dᵀ)o 를 쌓고 A p = b 를 푼다. (대칭이라 row/col-major 무관)
+    function closestPointToRays(rays, w) {
+      const A = new THREE.Matrix3().set(0,0,0, 0,0,0, 0,0,0);
+      const ae = A.elements;
+      const b = new THREE.Vector3();
+      for (let i = 0; i < rays.length; i++) {
+        const { o, d } = rays[i], wi = w[i];
+        const m00=wi*(1-d.x*d.x), m01=wi*(-d.x*d.y), m02=wi*(-d.x*d.z);
+        const m11=wi*(1-d.y*d.y), m12=wi*(-d.y*d.z), m22=wi*(1-d.z*d.z);
+        ae[0]+=m00; ae[1]+=m01; ae[2]+=m02;
+        ae[3]+=m01; ae[4]+=m11; ae[5]+=m12;
+        ae[6]+=m02; ae[7]+=m12; ae[8]+=m22;
+        b.x += m00*o.x + m01*o.y + m02*o.z;
+        b.y += m01*o.x + m11*o.y + m12*o.z;
+        b.z += m02*o.x + m12*o.y + m22*o.z;
+      }
+      if (Math.abs(A.determinant()) < 1e-6) return null;
+      return b.applyMatrix3(A.invert());
+    }
+    const median = arr => { const s=[...arr].sort((a,b)=>a-b), n=s.length;
+      return n ? (n%2 ? s[(n-1)/2] : (s[n/2-1]+s[n/2])/2) : 0; };
+    const rayW = r => Math.max(0.1, r.w ?? 1);
+    // 단위벡터 광선들의 최대 사이각(rad). 삼각측량 기하가 충분히 "벌어졌는지" 판정용.
+    function maxRaySpread(rays) {
+      let m = 0;
+      for (let i = 0; i < rays.length; i++)
+        for (let j = i + 1; j < rays.length; j++)
+          m = Math.max(m, Math.acos(Math.min(1, Math.max(-1, rays[i].d.dot(rays[j].d)))));
+      return m;
+    }
+
+    // 여러 광선의 수렴점(= 진짜 사물 위치)을 "강건하게" 추정한다.
+    //   고도화 포인트:
+    //    (1) 외란(outlier) 저항 — 잘못 묶이거나 가려진 광선 1~2개가 단순 최소제곱 해를
+    //        통째로 끌어가는 문제를 Huber 가중 IRLS(반복 재가중 최소제곱)로 억제.
+    //        근거: Huber(1964) M-추정 / Hartley & Zisserman MVG의 강건 삼각측량.
+    //    (2) 신뢰도 산출 — 인라이어 광선들의 수직거리 RMS를 함께 반환해, 호출부가
+    //        "얼마나 잘 수렴했나"로 베스트샷 레이캐스트와 대조해 채택을 결정한다.
+    //    (3) 검출점수 가중 — 확신 높은 검출(ray.w)에 더 큰 비중을 준다.
+    //   반환: { point, rms, inliers } (실패 시 null)
+    function triangulateRays(rays) {
+      if (!rays || rays.length < 2) return null;
+      // ★ 가드: 광선들이 충분히 "벌어져"(≥6°) 있어야 삼각측량이 의미있다. ★
+      //   거의 평행한 광선은 최소제곱이 시작점 근처로 "붕괴"해 좌표가 카메라에 박힌다(관측된 버그).
+      //   근거: 삼각측량 최적 각도 6~10°(Gallup et al., CVPR 2008).
+      if (maxRaySpread(rays) < 0.105) return null;        // 0.105 rad ≈ 6°
+
+      // 초기 가중 = 검출점수(ray.w). IRLS 4회로 잔차 큰 광선을 점점 깎아 외란을 억제한다.
+      let w = rays.map(rayW), p = null, res = null;
+      for (let it = 0; it < 4; it++) {
+        p = closestPointToRays(rays, w);
+        if (!p) return null;
+        res = rays.map(r => pointRayDistance(r.o, r.d, p).dist);   // 각 광선까지 수직거리(잔차)
+        const sigma = Math.max(median(res), 0.05);                 // 강건 스케일(잔차 중앙값)
+        const k = 1.345 * sigma;                                   // Huber 임계(표준 상수)
+        w = rays.map((r, i) => rayW(r) * (res[i] <= k ? 1 : k / res[i]));
+      }
+      // 인라이어 = 잔차가 작은(< max(3σ, 0.15m)) 광선. 외란을 떼고 기하·해·신뢰도를 다시 본다.
+      const sigma = Math.max(median(res), 0.05);
+      const keep = rays.filter((_, i) => res[i] <= Math.max(3 * sigma, 0.15));
+      if (keep.length < 2) return null;
+      if (maxRaySpread(keep) < 0.105) return null;        // 외란 제거 후 남은 광선이 평행하면 무효
+      p = closestPointToRays(keep, keep.map(rayW));
+      if (!p) return null;
+      const kres = keep.map(r => pointRayDistance(r.o, r.d, p).dist);
+      const rms = Math.sqrt(kres.reduce((s, e) => s + e * e, 0) / kres.length);
+      // 검증: 인라이어 광선의 앞쪽(t>0)이고, 어떤 시작점에도 붙지 않아야(degenerate 방지).
+      for (const { o, d } of keep) {
+        const t = p.clone().sub(o).dot(d);
+        if (t < 0.25 || p.distanceTo(o) < 0.5) return null;
+      }
+      return { point: p, rms, inliers: keep.length };
+    }
+    // 두 광선의 최단 접근 거리(+ 각자 앞쪽인지). 두 광선이 "같은 사물에서 수렴"하는지 판정용.
+    function raysClosest(a, c) {
+      const r = new THREE.Vector3().subVectors(a.o, c.o);
+      const bd = a.d.dot(c.d);
+      const denom = 1 - bd*bd;                   // 두 단위벡터 사이
+      if (Math.abs(denom) < 1e-6) return { dist: Infinity, sa: 0, tb: 0 }; // 평행
+      const D = a.d.dot(r), E = c.d.dot(r);
+      const sa = (bd*E - D) / denom;
+      const tb = (E - bd*D) / denom;
+      const pa = a.d.clone().multiplyScalar(sa).add(a.o);
+      const pb = c.d.clone().multiplyScalar(tb).add(c.o);
+      return { dist: pa.distanceTo(pb), sa, tb };
+    }
+    const rayPoint = (ray, t=2.5) => ray.o.clone().add(ray.d.clone().multiplyScalar(t));
+
+    // 검출기 추상화: Azure(서버 프록시) 우선, 없으면 브라우저 OWL-ViT 폴백.
+    // 반환 박스는 항상 0~1 비율로 통일한다.
+    async function detectObjects(dataURL, CW, CH) {
+      if (USE_AZURE) {
+        try {
+          const r = await fetch("/api/detect", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ imageBase64: dataURL, width: CW, height: CH })
+          });
+          const j = await r.json();
+          if (j.configured) {
+            lastSource = "azure";
+            const out = (j.objects || []).map(o => ({ label: o.label, score: o.score, box: o.box }));
+            // dense caption 문장에서 사물 명사를 뽑아 추가(화분·조명·창문 등 더 많이)
+            for (const c of (j.captions || [])) {
+              const noun = captionNoun(c.text);
+              if (noun) out.push({ label: noun, score: c.score, box: c.box });
+            }
+            return out;
+          }
+        } catch (e) { /* 실패 시 아래 브라우저 폴백 */ }
+      }
+      await ensureDetector();
+      lastSource = "browser";
+      const dets = await detector(dataURL, CANDIDATE_LABELS, { threshold: 0.12, topk: 12 });
+      return dets.map(d => ({ label: d.label, score: d.score,
+        box: { xmin: d.box.xmin/CW, ymin: d.box.ymin/CH, xmax: d.box.xmax/CW, ymax: d.box.ymax/CH } }));
+    }
+
+    // 검출 후보를 같은 사물끼리 묶는다. 매칭은 "광선끼리 수렴(최단접근)" 기준.
+    //   각 후보(member)는 {label, score, ray, hit}을 들고 있다(hit = 그 샷에서 GLB에 쏜 표면 적중점).
+    function clusterCandidates(candidates, triBounds) {
+      const clusters = [];
+      for (const c of candidates) {
+        let best = null, bestDist = 0.85;
+        for (const cl of clusters) {
+          if (cl.label !== c.label) continue;
+          for (const m of cl.members) {
+            const { dist, sa, tb } = raysClosest(c.ray, m.ray);
+            if (sa > 0 && tb > 0 && dist < bestDist) { bestDist = dist; best = cl; break; }
+          }
+        }
+        if (best) best.members.push(c);
+        else clusters.push({ label: c.label, members: [c] });
+      }
+      for (const k of clusters) finalizeCluster(k, triBounds);
+      // 같은 라벨이 가까우면(1m) 통합(분리 검출된 한 사물).
+      for (let i = 0; i < clusters.length; i++) {
+        for (let j = clusters.length - 1; j > i; j--) {
+          if (clusters[i].label === clusters[j].label && clusters[i].point.distanceTo(clusters[j].point) < 1.0) {
+            clusters[i].members.push(...clusters[j].members);
+            finalizeCluster(clusters[i], triBounds);
+            clusters.splice(j, 1);
+          }
+        }
+      }
+      return clusters;
+    }
+
+    // 한 클러스터의 최종 위치를 정한다.
+    //   ★ 기본은 "베스트샷 레이캐스트": 점수 가장 높은 샷에서 GLB에 쏜 표면 적중점을 쓴다.
+    //     (GLB라는 3D 형상을 이미 가졌으므로 1샷이면 위치가 나온다 → 반복 촬영 불필요)
+    //   ★ 삼각측량은 "가림(occlusion) 의심"일 때만 보정용으로: 베스트샷 적중점이 다시점
+    //     광선 수렴점과 0.6m 넘게 어긋나면(=베스트샷 광선이 중간 벽을 맞았을 가능성) 수렴점 사용.
+    function finalizeCluster(k, triBounds) {
+      // 광선에 검출점수를 가중치(w)로 실어 강건 삼각측량에 넘긴다(확신 높은 검출에 더 큰 비중).
+      k.rays = k.members.map(m => ({ o: m.ray.o, d: m.ray.d, w: Math.max(0.1, Math.min(1, m.score || 0.3)) }));
+      k.count = k.members.length;
+      k.score = Math.max(...k.members.map(m => m.score));
+      const withHit = k.members.filter(m => m.hit).sort((a, b) => b.score - a.score);
+      const triRes = k.rays.length >= 2 ? triangulateRays(k.rays) : null;
+      // 방 범위 안 + 충분히 수렴(RMS<0.5m)한 삼각측량만 신뢰. 수렴 신뢰도(RMS)는 표시·디버그용 보관.
+      const tri = (triRes && triBounds.containsPoint(triRes.point) && triRes.rms < 0.5) ? triRes.point : null;
+      k.triRms = triRes ? triRes.rms : null;
+      if (withHit.length) {
+        const bestHit = withHit[0].hit;
+        // 가림 의심(베스트샷 광선이 중간 벽을 맞음): 베스트샷 적중점이 "잘 수렴한(RMS<0.35m)"
+        //   삼각측량 수렴점과 0.6m 넘게 어긋날 때만 삼각측량으로 보정(느슨한 삼각측량은 신뢰 안 함).
+        if (tri && triRes.rms < 0.35 && bestHit.distanceTo(tri) > 0.6) {
+          k.point = tri.clone(); k.posMethod = "triangulation";
+        } else {                                            // 정상 → 베스트샷 표면 적중
+          k.point = bestHit.clone(); k.posMethod = "raycast";
+        }
+      } else if (tri) {                                     // 표면 적중이 없으면 삼각측량
+        k.point = tri.clone(); k.posMethod = "triangulation";
+      } else {                                              // 둘 다 없으면 광선 위 추정(불확실)
+        k.point = rayPoint(k.rays[0]); k.posMethod = "guess";
+      }
+      k.triangulated = (k.posMethod === "triangulation");
+      k.reliable = (k.posMethod !== "guess");
+    }
+
+    // 위치 신뢰도 배지(표시용): 표면적중·삼각측량=신뢰, 불확실=주의
+    function posBadge(cl) {
+      if (cl.posMethod === "raycast")        return { t: `표면적중 ·${cl.count}검출`, ok: true };
+      if (cl.posMethod === "triangulation")  return { t: `삼각측량 ±${Math.round((cl.triRms||0)*100)}cm ·${cl.count}검출`, ok: true };
+      return { t: `불확실 ·${cl.count}검출`, ok: false };
+    }
+
+    $("scanBtn").addEventListener("click", scanRoom);
+    async function scanRoom() {
+      $("scanBtn").disabled = true;
+      scanning = true;              // 렌더루프가 스캔 중 카메라를 못 건드리게
+      try {
+        clearMarkers();
+        controls.enabled = false;
+        // (Azure면 브라우저 모델은 안 받는다 — detectObjects가 폴백 때만 지연 로드)
+
+        const center = roomBounds.getCenter(new THREE.Vector3());
+        const min = roomBounds.min, max = roomBounds.max;
+        const size = new THREE.Vector3().subVectors(max, min);
+        const floorY = min.y;
+        const ceilY = min.y + (max.y - min.y) * 0.9;
+        const eyeY = min.y + 1.4;
+        const ringR = Math.max(1.8, Math.min(size.x, size.z) * 0.42);
+        const triBounds = roomBounds.clone().expandByScalar(1.0);
+
+        // 커버리지 전용: Azure 콜은 비용이므로, 방을 빠짐없이 보는 데 필요한 만큼만 촬영하고
+        // 같은 사물을 반복 촬영하지 않는다. 위치는 각 사물의 "베스트샷"에서 GLB 레이캐스트로
+        // 1샷에 구한다(우리는 3D 형상을 이미 가졌으므로 사진 재구성용 다중촬영이 불필요).
+        const MAX_SHOTS = USE_AZURE ? 16 : 30;
+        const PASS1_MAX = Math.max(4, Math.ceil(MAX_SHOTS * 0.6));   // 1차(커버리지)에 예산 60%, 나머지는 2차(조준)
+        let used = 0;
+        const candidates = [];
+
+        // 한 시점에서: 카메라 배치 → 렌더 → 검출 → (광선+시드히트) 후보 반환
+        async function runShot(pos, target, tag) {
+          camera.position.copy(pos);
+          camera.lookAt(target);
+          camera.updateMatrixWorld(true);
+          renderer.render(scene, camera);
+          const CW = renderer.domElement.width, CH = renderer.domElement.height;
+          const dataURL = renderer.domElement.toDataURL(USE_AZURE ? "image/png" : "image/jpeg", 0.92);
+          const objs = await detectObjects(dataURL, CW, CH);   // box는 이미 0~1
+          used++;
+          setStatus(`AI 방 스캔 중… ${used}/${MAX_SHOTS} 샷 · ${tag}`);
+          // 검출은 전부 채택(리스트·마커에 다 보이게). 개념 매핑/타깃팅에서만 가구를 추린다.
+          return objs.map(o => ({ label: normalizeLabel(o.label), score: o.score,
+            ray: boxCenterRay(o.box), hit: raycastBoxRobust(o.box) }));
+        }
+
+        // ===== 커버리지 촬영: 눈높이 격자 × 바깥 4방향 — 방 곳곳을 빠짐없이 "한 번씩" 본다 =====
+        // (중앙만 보면 위치가 중앙으로 편향 → 격자에서 바깥을 봐야 침실·주방까지 펼쳐 잡힌다)
+        // 근거: 카메라 FOV 60°(수직)/~85°(수평), 시거리 ~2.5m → 1.8m 격자면 인접 샷이
+        //   수평 ~60% 겹침. 사진측량 권장 겹침(3D 재구성 60~80%)에 부합하고, 우리처럼
+        //   "검출만(재구성 X)" 하는 경우의 커버리지 요건(각 사물 ≥1회 관측)엔 충분.
+        //   (상세: docs/SCAN_GEOMETRY_BASIS.md)
+        const aimFloor = (px, pz, a, R) => new THREE.Vector3(px + Math.sin(a)*R, floorY + 0.25, pz - Math.cos(a)*R);
+        const DIRS = [0, Math.PI/2, Math.PI, -Math.PI/2];
+        const shots = [];
+        for (let x = min.x + 0.9; x <= max.x - 0.9 + 1e-6; x += 1.8)   // 1.8m 격자(위 근거)
+          for (let z = min.z + 0.9; z <= max.z - 0.9 + 1e-6; z += 1.8) {
+            const v = new THREE.Vector3(x, eyeY, z);
+            if (!isVantageValid(v)) continue;
+            for (const a of DIRS) shots.push({ pos: v, target: aimFloor(x, z, a, 2.5) });
+          }
+        // 단일 방(격자가 거의 안 잡힘)이면 중앙 오비트 링 8방향으로 보강.
+        if (shots.length < 4) {
+          for (let i = 0; i < 8; i++) {
+            const a = i/8 * Math.PI * 2;
+            shots.push({ pos: new THREE.Vector3(center.x + Math.cos(a)*ringR, eyeY, center.z + Math.sin(a)*ringR),
+                         target: new THREE.Vector3(center.x, floorY + 0.5, center.z) });
+          }
+        }
+        // ===== 1차: 커버리지 촬영 (대략 위치 파악) — 예산 60%(PASS1_MAX)까지만 =====
+        for (const sh of shots) {
+          if (used >= PASS1_MAX) break;
+          candidates.push(...await runShot(sh.pos, sh.target, "1차 커버리지"));
+        }
+
+        // 1차 클러스터: 같은 사물끼리 묶어 "대략 위치"를 얻는다(베스트샷 레이캐스트 + 가림시 삼각측량).
+        const clusters = clusterCandidates(candidates, triBounds);
+
+        // ===== 2차: 사물별 조준 촬영 (정밀 3D 좌표) =====
+        //   1차에서 잡힌 각 사물을, 그 대략 위치(P)를 중심으로 ≥15° 벌어진 다른 각도에서 조준 촬영해
+        //   광선을 추가 → 강건 삼각측량(검출점수 가중 + 외란 저항)으로 위치를 정밀화한다.
+        //   근거: 삼각측량 최적 각도 6~10°(Gallup CVPR'08) → 후보를 ≥15°로 벌려 여유있게 확보.
+        //   예산: 남은 샷(MAX_SHOTS−PASS1_MAX)을, "위치가 불안한 사물"부터 우선 배정.
+        const angDiff = (a, b) => { let d = Math.abs(a - b) % (Math.PI*2); return d > Math.PI ? Math.PI*2 - d : d; };
+        async function aimedRefine() {
+          // 정밀화 대상: 위치가 불안한 것(불확실/관측 1회/삼각측량 느슨 RMS>0.25m)을 우선.
+          const needs = c => !c.reliable || c.count < 2 || c.triRms == null || c.triRms > 0.25;
+          const targets = clusters.filter(needs).sort((a, b) =>
+            (a.reliable?1:0)-(b.reliable?1:0) || a.count-b.count || b.score-a.score);
+          const AIM_PER_OBJ = 2;                 // 사물당 추가 조준 샷(1차 광선과 합쳐 2~3시점)
+          const minSep = 15 * Math.PI/180;       // 조준 시점끼리 최소 사이각
+          let refined = 0;
+          for (const cl of targets) {
+            if (used >= MAX_SHOTS) break;
+            const P = cl.point.clone();
+            // P를 중심으로 반경 ~2.4m 원호 위의 "열린 공간" 시점 후보를 모은다(벽 속/방 밖 제외).
+            const R = 2.4, cand = [];
+            for (let k = 0; k < 12; k++) {
+              const a = (k/12) * Math.PI*2;
+              const v = new THREE.Vector3(P.x + Math.cos(a)*R, eyeY, P.z + Math.sin(a)*R);
+              if (isVantageValid(v)) cand.push({ v, a });
+            }
+            // 서로 ≥15° 벌어진 시점만 골라 삼각측량 기하를 확보.
+            const chosen = [];
+            for (const c of cand) {
+              if (chosen.length >= AIM_PER_OBJ) break;
+              if (chosen.every(ch => angDiff(ch.a, c.a) > minSep)) chosen.push(c);
+            }
+            for (const ch of chosen) {
+              if (used >= MAX_SHOTS) break;
+              const got = await runShot(ch.v, P, "2차 조준");
+              // 이 샷의 검출 중 "광선이 P 앞쪽을 가장 가까이 지나는 것"(=같은 사물)을 골라 추가.
+              let best = null, bestd = 0.8;
+              for (const g of got) {
+                if (g.label !== cl.label) continue;
+                const { dist, t } = pointRayDistance(g.ray.o, g.ray.d, P);
+                if (t > 0 && dist < bestd) { bestd = dist; best = g; }
+              }
+              if (!best) {                          // 라벨 달라도 위치가 아주 가까우면 같은 사물로 완화 채택
+                for (const g of got) {
+                  const { dist, t } = pointRayDistance(g.ray.o, g.ray.d, P);
+                  if (t > 0 && dist < 0.45) { best = g; break; }
+                }
+              }
+              if (best) cl.members.push(best);
+            }
+            finalizeCluster(cl, triBounds);         // 추가된 광선으로 위치 재계산(정밀화)
+            refined++;
+          }
+          return refined;
+        }
+        if (used < MAX_SHOTS) {
+          setStatus(`AI 방 스캔 중… 2차 정밀 조준 촬영…`);
+          await aimedRefine();
+        }
+        const total = used;
+        window.__lastClusters = clusters.map(k => ({ label:k.label, rays:k.rays.length, score:+k.score.toFixed(2) }));
+        const byQuality = (a, b) => ((b.reliable?1:0)-(a.reliable?1:0)) || (b.count - a.count) || (b.score - a.score);
+        // 위치가 신뢰되는 것(표면적중·삼각측량) 우선. 베스트샷 레이캐스트는 1샷이어도 신뢰됨.
+        let merged = clusters.filter(k => k.reliable).sort(byQuality);
+        if (merged.length < 3) merged = clusters.slice().sort(byQuality); // 너무 적으면 불확실도 허용
+
+        hotspots = assignConcepts(merged, center);
+        placeMarkers();
+        clusters.forEach((k, i) => { k.color = RAY_COLORS[i % RAY_COLORS.length]; }); // 색 배정(리스트·마커·광선 공통)
+        window.__scanClusters = clusters;
+        buildDetectMarkers(clusters);   // 검출된 모든 사물에 마커+라벨(항상 표시)
+        buildRayLines(clusters);        // 광선(선)은 토글
+        renderDetectList(clusters);     // 검출 결과 리스트(인식율·광선수)
+        $("raysBtn").disabled = false;
+        $("detectPanel").classList.remove("hide");
+        renderList();
+        // 스캔 후 방 전체가 보이는 조망 위치로 카메라를 옮긴다(중앙에 박혀 있지 않게).
+        const sz = roomBounds.getSize(new THREE.Vector3());
+        camera.position.set(center.x + sz.x*0.15, center.y + sz.y*1.3 + 0.8, center.z + sz.z*1.25);
+        controls.target.set(center.x, center.y*0.5, center.z);
+        controls.update();
+        renderList();
+        selectHotspot(0);
+        $("sidePanel").classList.remove("hide");
+        $("exportBtn").disabled = false;
+        const real = hotspots.filter(h=>h.detectedClass).length;
+        const srcLabel = lastSource === "azure" ? "Azure AI Vision" : "브라우저 OWL-ViT";
+        setStatus(`완료 · 검출기 <b>${srcLabel}</b> · ${total}개 샷 스캔 → 사물 <b>${merged.length}</b>개 인식, 기억 지점 <b>${hotspots.length}</b>개 생성(실제 사물 ${real}개).`);
+      } catch (err) {
+        console.error(err);
+        setStatus("오류: " + (err?.message||err));
+      } finally {
+        scanning = false;           // 렌더루프 재개
+        controls.enabled = true;
+        $("scanBtn").disabled = false;
+      }
+    }
+
+    function assignConcepts(objs, center) {
+      const used = new Set();
+      // 엄격 매핑: 개념의 "선호 사물"이 방에 있을 때만 배정한다.
+      // (없으면 그 개념은 생략 — 변기를 '훈민정음'에 억지로 붙이는 의미 왜곡 방지.)
+      const pick = (concept) => {
+        for (const cls of concept.preferred) {
+          const i = objs.findIndex((o,k)=>!used.has(k) && o.label===cls);
+          if (i>=0){ used.add(i); return objs[i]; }
+        }
+        return null;
+      };
+      const out = [];
+      CONCEPTS.forEach((concept) => {
+        if (concept.preferred[0]==="__scene__") {
+          out.push({ title:concept.title, conceptId:concept.id, object:"방 전체(조망)", detectedClass:null,
+            score:null, pos:new THREE.Vector3(center.x, 2.0, center.z), summary:concept.summary, cue:concept.cue });
+          return;
+        }
+        const o = pick(concept);
+        if (!o) return;
+        out.push({ title:concept.title, conceptId:concept.id, object:KO[o.label]||o.label, detectedClass:o.label,
+          score:+o.score.toFixed(2), pos:o.point.clone(), summary:concept.summary, cue:concept.cue });
+      });
+      out.forEach((h,i)=>h.number=i+1);
+      return out;
+    }
+
+    // ---- 3D 번호 마커 (room-03 스타일, 항상 보이게 depthTest off) ----
+    function numberSprite(n) {
+      const cv = document.createElement("canvas"); cv.width=cv.height=160;
+      const g = cv.getContext("2d");
+      g.beginPath(); g.arc(80,80,58,0,7); g.fillStyle="rgba(10,14,12,.82)"; g.fill();
+      g.lineWidth=6; g.strokeStyle="rgba(169,216,200,.95)"; g.stroke();
+      g.fillStyle="#fffaf0"; g.font="800 64px Arial"; g.textAlign="center"; g.textBaseline="middle"; g.fillText(String(n),80,84);
+      const tex = new THREE.CanvasTexture(cv); tex.colorSpace=THREE.SRGBColorSpace;
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map:tex, depthTest:false, depthWrite:false, transparent:true }));
+      sp.scale.set(0.34,0.34,0.34);
+      return sp;
+    }
+    function placeMarkers() {
+      clearMarkers();
+      hotspots.forEach((h,i) => {
+        const sp = numberSprite(h.number);
+        sp.position.copy(h.pos).add(new THREE.Vector3(0,0.25,0));
+        sp.userData.index = i; sp.renderOrder = 999;
+        scene.add(sp); markerSprites.push(sp);
+      });
+    }
+    function clearMarkers() { markerSprites.forEach(s=>scene.remove(s)); markerSprites.length=0; }
+
+    // ── 광선 시각화(디버그) ──────────────────────────────────────────────
+    // 각 광선을 "카메라 시작점 → 수렴점"까지 선으로 그린다. 여러 시작점에서 쏜
+    // 광선이 한 점(사물)에서 만나는 모습을 눈으로 본다. 기본은 숨김(버튼으로 토글).
+    const rayLinesGroup = new THREE.Group();
+    rayLinesGroup.visible = false;          // 광선(선)은 토글
+    scene.add(rayLinesGroup);
+    const detectMarkersGroup = new THREE.Group();  // 검출된 모든 사물 마커(점+라벨) — 항상 표시
+    scene.add(detectMarkersGroup);
+    const RAY_COLORS = [0x7fd1ff, 0xffd166, 0xa9d8c8, 0xff8fab, 0xb1a7ff, 0x8ce99a, 0xffa94d, 0xf06595];
+
+    // 둥근 사각 텍스트 라벨 스프라이트(수렴점 옆에 "의자 75% ·3" 표시)
+    function makeTextSprite(text, hex) {
+      const fs = 44, pad = 12;
+      const m = document.createElement("canvas").getContext("2d");
+      m.font = `800 ${fs}px "Malgun Gothic", Arial`;
+      const w = Math.ceil(m.measureText(text).width);
+      const cv = document.createElement("canvas");
+      cv.width = w + pad*2; cv.height = fs + pad*2;
+      const g = cv.getContext("2d");
+      g.font = `800 ${fs}px "Malgun Gothic", Arial`;
+      const r = 12; g.beginPath();
+      g.moveTo(r,0); g.arcTo(cv.width,0,cv.width,cv.height,r); g.arcTo(cv.width,cv.height,0,cv.height,r);
+      g.arcTo(0,cv.height,0,0,r); g.arcTo(0,0,cv.width,0,r); g.closePath();
+      g.fillStyle = "rgba(8,12,11,.85)"; g.fill();
+      g.fillStyle = "#" + hex.toString(16).padStart(6,"0");
+      g.textBaseline = "middle"; g.fillText(text, pad, cv.height/2 + 2);
+      const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map:tex, depthTest:false, depthWrite:false, transparent:true }));
+      sp.scale.set((cv.width/cv.height)*0.32, 0.32, 0.32);
+      return sp;
+    }
+
+    function buildRayLines(clusters) {
+      while (rayLinesGroup.children.length) rayLinesGroup.remove(rayLinesGroup.children[0]);
+      clusters.forEach((cl, idx) => {
+        const color = cl.color ?? RAY_COLORS[idx % RAY_COLORS.length];
+        const tri = !!cl.triangulated;
+        cl.rays.forEach((ray) => {
+          // 카메라 시작점(o) → 수렴점(cl.point) 선. 1광선이면 흐리게.
+          const geo = new THREE.BufferGeometry().setFromPoints([ray.o.clone(), cl.point.clone()]);
+          const mat = new THREE.LineBasicMaterial({ color, transparent:true, opacity: tri?0.6:0.22, depthTest:false });
+          rayLinesGroup.add(new THREE.Line(geo, mat));
+          const dot = new THREE.Mesh(new THREE.SphereGeometry(0.045,8,6), new THREE.MeshBasicMaterial({ color, depthTest:false }));
+          dot.position.copy(ray.o); dot.renderOrder = 998; rayLinesGroup.add(dot);
+        });
+      });
+    }
+
+    // 검출된 "모든" 사물에 점 마커를 찍는다. 라벨은 평소 숨김 → 마우스를 가까이
+    // 가져가거나(호버) 클릭/목록선택했을 때만 그 사물의 라벨을 띄운다(겹침 방지).
+    function buildDetectMarkers(clusters) {
+      while (detectMarkersGroup.children.length) detectMarkersGroup.remove(detectMarkersGroup.children[0]);
+      detectSpheres = []; hoverCluster = null; selectedCluster = null;
+      clusters.forEach((cl, idx) => {
+        const color = cl.color ?? RAY_COLORS[idx % RAY_COLORS.length];
+        const rel = !!cl.reliable;          // 위치 신뢰(표면적중/삼각측량)면 점을 크고 진하게
+        const sphere = new THREE.Mesh(new THREE.SphereGeometry(rel?0.1:0.075,12,10),
+          new THREE.MeshBasicMaterial({ color, transparent:true, opacity: rel?1:0.6, depthTest:false }));
+        sphere.position.copy(cl.point); sphere.renderOrder = 1000;
+        sphere.userData.cluster = cl;
+        detectMarkersGroup.add(sphere); detectSpheres.push(sphere);
+        const ko = KO[cl.label] || cl.label;
+        const label = makeTextSprite(`${ko} ${Math.round(cl.score*100)}% ·${cl.rays.length}`, color);
+        label.position.copy(cl.point).add(new THREE.Vector3(0, 0.22, 0));
+        label.renderOrder = 1002;
+        label.visible = false;              // 평소엔 숨김
+        cl._label = label; cl._sphere = sphere;
+        detectMarkersGroup.add(label);
+      });
+      refreshDetectLabels();
+    }
+
+    // 호버/선택 상태에 맞춰 라벨 표시를 갱신. 선택된 점은 약간 키워 강조.
+    function refreshDetectLabels() {
+      for (const s of detectSpheres) {
+        const cl = s.userData.cluster;
+        if (cl._label) cl._label.visible = (cl === hoverCluster || cl === selectedCluster);
+        const on = (cl === selectedCluster);
+        s.scale.setScalar(on ? 1.6 : 1);   // 선택된 점 강조
+      }
+    }
+
+    // 커서에서 화면상 가장 가까운 검출 점을 고른다(작은 점이라 너그럽게 40px 이내).
+    function pickNearestDetect(clientX, clientY) {
+      if (!detectSpheres.length) return null;
+      const r = renderer.domElement.getBoundingClientRect();
+      let best = null, bestD = 40;
+      const v = new THREE.Vector3();
+      for (const s of detectSpheres) {
+        v.copy(s.position).project(camera);
+        if (v.z > 1) continue;             // 카메라 뒤
+        const sx = r.left + (v.x*0.5+0.5)*r.width;
+        const sy = r.top + (-v.y*0.5+0.5)*r.height;
+        const d = Math.hypot(clientX - sx, clientY - sy);
+        if (d < bestD) { bestD = d; best = s.userData.cluster; }
+      }
+      return best;
+    }
+
+    // 사물 선택: 라벨 고정 + 그 사물로 카메라 이동.
+    function selectDetect(cl) {
+      selectedCluster = cl;
+      refreshDetectLabels();
+      controls.target.copy(cl.point);
+      camera.position.copy(cl.point).add(new THREE.Vector3(2.0, 1.4, 2.0));
+      controls.update();
+    }
+
+    // AI가 인식한 모든 사물을 리스트로(인식율·광선수). 행 클릭 시 그 사물로 카메라 이동.
+    function renderDetectList(clusters) {
+      const el = $("detectList"); el.innerHTML = "";
+      const sorted = clusters.slice().sort((a,b) => ((b.reliable?1:0)-(a.reliable?1:0)) || (b.count - a.count) || (b.score - a.score));
+      for (const cl of sorted) {
+        const ko = KO[cl.label] || cl.label;
+        const b = posBadge(cl);
+        const hex = (cl.color ?? 0xffffff).toString(16).padStart(6,"0");
+        const row = document.createElement("div");
+        row.className = "drow";
+        row.innerHTML = `<span class="swatch" style="background:#${hex}"></span>` +
+          `<span class="name">${ko}</span>` +
+          `<span class="pct">${Math.round(cl.score*100)}%</span>` +
+          `<span class="tri ${b.ok?'ok':'weak'}">${b.t}</span>`;
+        row.addEventListener("click", () => selectDetect(cl));   // 라벨 고정 + 카메라 이동
+        // 목록 행에 마우스를 올리면 3D에서 그 사물 라벨을 미리보기
+        row.addEventListener("mouseenter", () => { hoverCluster = cl; refreshDetectLabels(); });
+        row.addEventListener("mouseleave", () => { if (hoverCluster === cl) { hoverCluster = null; refreshDetectLabels(); } });
+        el.appendChild(row);
+      }
+    }
+
+    $("raysBtn").addEventListener("click", () => {
+      rayLinesGroup.visible = !rayLinesGroup.visible;
+      $("raysBtn").textContent = rayLinesGroup.visible ? "광선 숨기기" : "광선 보기";
+    });
+
+    // 캔버스에서 마우스를 움직이면, 커서에 가까운 검출 점의 라벨을 호버 표시.
+    renderer.domElement.addEventListener("pointermove", (e) => {
+      const cl = pickNearestDetect(e.clientX, e.clientY);
+      if (cl !== hoverCluster) {
+        hoverCluster = cl; refreshDetectLabels();
+        renderer.domElement.style.cursor = cl ? "pointer" : "";
+      }
+    });
+
+    // 클릭 vs 드래그(회전) 구분 — 드래그였으면 선택하지 않는다(카메라 튐 방지).
+    let pDownX = 0, pDownY = 0;
+    renderer.domElement.addEventListener("pointerdown", (e) => { pDownX = e.clientX; pDownY = e.clientY; });
+    renderer.domElement.addEventListener("pointerup", (e) => {
+      if (Math.hypot(e.clientX - pDownX, e.clientY - pDownY) > 6) return;   // 드래그 = 회전
+      // ① 검출 점 클릭 → 그 사물 선택(라벨 고정 + 카메라 이동)
+      const cl = pickNearestDetect(e.clientX, e.clientY);
+      if (cl) { selectDetect(cl); return; }
+      // ② 핫스팟 번호 마커 클릭
+      if (!markerSprites.length) return;
+      const r = renderer.domElement.getBoundingClientRect();
+      const v = new THREE.Vector2(((e.clientX-r.left)/r.width)*2-1, -((e.clientY-r.top)/r.height)*2+1);
+      raycaster.setFromCamera(v, camera);
+      const hit = raycaster.intersectObjects(markerSprites, false)[0];
+      if (hit) selectHotspot(hit.object.userData.index);
+    });
+
+    function renderList() {
+      const list = $("list"); list.innerHTML="";
+      hotspots.forEach((h,i) => {
+        const row = document.createElement("div");
+        row.className = "row" + (i===activeIndex?" active":"");
+        row.innerHTML = `<span class="n">${h.number}</span><span>${h.title} · <b>${h.object}</b></span>
+          <span class="conf">${h.score!=null?Math.round(h.score*100)+"%":"조망"}</span>`;
+        row.addEventListener("click", ()=>selectHotspot(i));
+        list.appendChild(row);
+      });
+    }
+    function selectHotspot(i) {
+      activeIndex = i; const h = hotspots[i]; if (!h) return;
+      $("cTitle").textContent = `${h.number}. ${h.title}`;
+      $("cObject").textContent = `이 자리의 실제 사물: ${h.object}` + (h.detectedClass?` (${h.detectedClass})`:"");
+      $("cSummary").textContent = h.summary;
+      $("cCue").textContent = h.cue;
+      markerSprites.forEach((s,k)=>s.scale.setScalar(k===i?0.46:0.34));
+      $("list").querySelectorAll(".row").forEach((r,k)=>r.classList.toggle("active",k===i));
+      // 선택한 마커를 바라보게 카메라 타겟 이동(부드럽게)
+      controls.target.lerp(h.pos, 0.6);
+    }
+
+    // ---- 내보내기(room-03 ROOM_HOTSPOTS 호환: 3D 좌표 포함) ----
+    $("exportBtn").addEventListener("click", () => {
+      const payload = {
+        roomId: "user-glb-room-"+Date.now(),
+        title: "내 3D 방 기억궁전 (자동 스캔)",
+        generatedBy: "personal-room-scanner-3d (transformers.js + raycast, no external AI)",
+        hotspots: hotspots.map(h => ({
+          slot:h.number, conceptId:h.conceptId, title:h.title, object:h.object,
+          detectedClass:h.detectedClass, confidence:h.score,
+          markerPosition: [ +h.pos.x.toFixed(3), +h.pos.y.toFixed(3), +h.pos.z.toFixed(3) ], // 정확한 3D 좌표
+          summary:h.summary, memoryCue:h.cue
+        }))
+      };
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([JSON.stringify(payload,null,2)], {type:"application/json"}));
+      a.download = "my-room-3d-hotspots.json"; a.click();
+    });
+
+    // ---- 렌더 루프 ----
+    // 스캔 중엔 controls.update()가 카메라 방향을 controls.target으로 되돌려
+    // 광선 계산을 망친다 → 스캔 동안은 카메라를 건드리지 않는다.
+    function tick() { if (!scanning) { controls.update(); renderer.render(scene, camera); } requestAnimationFrame(tick); }
+    tick();
+    addEventListener("resize", () => {
+      camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth, innerHeight);
+    });
+
+    // 검증용 핸들
+    window.__scanner3d = {
+      get hotspots(){return hotspots;}, scanRoom,
+      // 디버그: 내부 객체 접근(카메라 프레이밍/가구 객체 확인용)
+      THREE, camera, controls, scene, roomGroup, get roomMeshes(){return roomMeshes;}, get roomBounds(){return roomBounds;},
+      // 현재 카메라 시점에서 검출기가 무엇을 보는지 확인(디버그용, 1콜)
+      async testDetect() {
+        renderer.render(scene, camera);
+        const CW = renderer.domElement.width, CH = renderer.domElement.height;
+        const dataURL = renderer.domElement.toDataURL("image/png");
+        const objs = await detectObjects(dataURL, CW, CH);
+        return { source: lastSource, objects: objs.map(o => ({ label:o.label, raw:normalizeLabel(o.label), score:+o.score.toFixed(2) })) };
+      }
+    };
+  </script>
+</body>
+</html>
