@@ -3,762 +3,402 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>세종대왕 동상 기억의 방 | 조선의 제도와 문화</title>
+  <title>세종대왕 동상 기억의 방</title>
   <style>
     :root {
       --ink: #f6f2e8;
       --muted: #c8c2b5;
-      --dim: #8f8879;
       --jade: #8bc7b0;
-      --gold: #c7a55a;
-      --bronze: #8a6044;
-      --panel: rgba(12, 14, 13, .78);
-      --line: rgba(246, 242, 232, .18);
-      --shadow: 0 24px 80px rgba(0, 0, 0, .48);
+      --panel: rgba(12,14,13,.9);
+      --line: rgba(246,242,232,.18);
+      --shadow: 0 20px 60px rgba(0,0,0,.5);
     }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #0b0e0d; color: var(--ink);
+      font-family: "IBM Plex Sans KR", "Malgun Gothic", system-ui, sans-serif; }
 
-    * { box-sizing: border-box; }
-
-    html,
-    body {
-      width: 100%;
-      height: 100%;
-      margin: 0;
-      overflow: hidden;
-      background: #0b0e0d;
-      color: var(--ink);
-      font-family: "IBM Plex Sans KR", "Malgun Gothic", system-ui, sans-serif;
-      letter-spacing: 0;
-    }
-
-    #scene {
-      position: fixed;
-      inset: 0;
-      background:
-        linear-gradient(180deg, #101614 0%, #1b2220 46%, #090c0b 100%);
-      cursor: grab;
-    }
-
+    #scene { position: fixed; inset: 0; cursor: grab; }
     #scene:active { cursor: grabbing; }
 
+    /* HUD (좌상단) */
     .hud {
-      position: fixed;
-      left: 18px;
-      top: 18px;
-      width: min(390px, calc(100vw - 36px));
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: var(--panel);
-      box-shadow: var(--shadow);
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
-      padding: 16px;
-      z-index: 3;
+      position: fixed; left: 18px; top: 18px;
+      width: min(260px, calc(100vw - 36px));
+      border: 1px solid var(--line); border-radius: 8px;
+      background: var(--panel); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+      box-shadow: var(--shadow); padding: 14px 16px; z-index: 3;
+    }
+    .kicker { color: var(--muted); font-size: 11px; font-weight: 900;
+      letter-spacing: .16em; text-transform: uppercase; }
+    h1 { margin: 5px 0 10px; font-size: 18px; line-height: 1.1; }
+    .controls { display: flex; gap: 8px; flex-wrap: wrap; }
+    .button, button {
+      min-height: 32px; border: 1px solid rgba(246,242,232,.24); border-radius: 7px;
+      background: rgba(255,255,255,.07); color: var(--ink);
+      padding: 0 12px; font: inherit; font-size: 12px; font-weight: 900;
+      text-decoration: none; display: inline-grid; place-items: center; cursor: pointer;
+    }
+    .button:hover, button:hover {
+      border-color: rgba(139,199,176,.68); background: rgba(139,199,176,.16);
     }
 
-    .kicker {
-      color: var(--muted);
-      font-size: 11px;
-      font-weight: 900;
-      letter-spacing: .16em;
-      text-transform: uppercase;
+    /* 설명 카드 (번호 클릭 시) */
+    .card {
+      position: fixed; right: 18px; top: 18px;
+      width: min(300px, calc(100vw - 36px));
+      border: 1px solid var(--line); border-radius: 8px;
+      background: var(--panel); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+      box-shadow: var(--shadow); padding: 16px; z-index: 4;
+      opacity: 0; pointer-events: none; transform: translateY(-8px);
+      transition: opacity .2s ease, transform .2s ease;
+    }
+    .card.show { opacity: 1; pointer-events: auto; transform: translateY(0); }
+    .card .hd { display: flex; align-items: center; gap: 10px; }
+    .num-badge {
+      min-width: 30px; height: 30px; border-radius: 50%;
+      background: var(--jade); color: #0b0e0d;
+      font-size: 14px; font-weight: 900; display: grid; place-items: center; flex-shrink: 0;
+    }
+    .card h2 { font-size: 16px; line-height: 1.2; flex: 1; }
+    .card .x { background: transparent; border: none; color: var(--muted);
+      font-size: 16px; cursor: pointer; min-height: auto; padding: 0 4px; }
+    .card .x:hover { color: var(--ink); }
+    .card .desc {
+      margin-top: 12px; padding: 10px 12px; min-height: 60px;
+      border: 1px dashed rgba(139,199,176,.3); border-radius: 6px;
+      color: var(--muted); font-size: 13px; line-height: 1.65;
     }
 
-    h1 {
-      margin: 6px 0 8px;
-      font-size: clamp(24px, 3.5vw, 40px);
-      line-height: 1.08;
-    }
-
-    p {
-      margin: 0;
-      color: var(--muted);
-      line-height: 1.6;
-      font-size: 13px;
-    }
-
-    .controls {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-      margin-top: 14px;
-    }
-
-    .button,
-    button {
-      min-height: 36px;
-      border: 1px solid rgba(246, 242, 232, .24);
-      border-radius: 8px;
-      background: rgba(255, 255, 255, .07);
-      color: var(--ink);
-      padding: 0 12px;
-      font: inherit;
-      font-size: 12px;
-      font-weight: 900;
-      text-decoration: none;
-      display: inline-grid;
-      place-items: center;
-      cursor: pointer;
-    }
-
-    .button:hover,
-    button:hover {
-      border-color: rgba(139, 199, 176, .68);
-      background: rgba(139, 199, 176, .16);
-    }
-
-    .side-panel {
-      position: fixed;
-      right: 18px;
-      top: 18px;
-      width: min(360px, calc(100vw - 36px));
-      max-height: calc(100vh - 36px);
-      overflow: auto;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: var(--panel);
-      box-shadow: var(--shadow);
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
-      padding: 16px;
-      z-index: 3;
-    }
-
-    .side-panel h2 {
-      margin: 6px 0 8px;
-      font-size: 24px;
-      line-height: 1.14;
-    }
-
-    .cue {
-      margin-top: 12px;
-      border: 1px solid rgba(246, 242, 232, .14);
-      border-radius: 8px;
-      background: rgba(255, 255, 255, .055);
-      padding: 12px;
-    }
-
-    .cue strong {
-      display: block;
-      margin-bottom: 6px;
-      color: var(--jade);
-      font-size: 12px;
-    }
-
-    .object-rail {
-      position: fixed;
-      left: 18px;
-      bottom: 18px;
-      width: min(820px, calc(100vw - 36px));
-      display: grid;
-      grid-template-columns: repeat(5, minmax(0, 1fr));
-      gap: 8px;
-      z-index: 3;
-    }
-
-    .object-card {
-      min-height: 78px;
-      border: 1px solid rgba(246, 242, 232, .16);
-      border-radius: 8px;
-      background: rgba(12, 14, 13, .72);
-      color: var(--muted);
-      padding: 10px;
-      text-align: left;
-      box-shadow: 0 16px 40px rgba(0, 0, 0, .30);
-    }
-
-    .object-card.active {
-      border-color: rgba(139, 199, 176, .72);
-      background: rgba(139, 199, 176, .16);
-      color: var(--ink);
-    }
-
-    .object-card strong {
-      display: block;
-      margin-bottom: 4px;
-      color: var(--ink);
-      font-size: 12px;
-      line-height: 1.2;
-    }
-
-    .object-card span {
-      display: block;
-      font-size: 11px;
-      line-height: 1.35;
-    }
-
+    /* 상태 바 */
     .status {
-      position: fixed;
-      right: 18px;
-      bottom: 18px;
-      max-width: min(420px, calc(100vw - 36px));
-      border: 1px solid rgba(246, 242, 232, .16);
-      border-radius: 999px;
-      background: rgba(12, 14, 13, .76);
-      color: var(--muted);
-      padding: 10px 14px;
-      font-size: 12px;
-      z-index: 3;
+      position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
+      border: 1px solid rgba(246,242,232,.14); border-radius: 999px;
+      background: rgba(12,14,13,.78); color: var(--muted);
+      padding: 8px 16px; font-size: 11px; z-index: 3; white-space: nowrap;
     }
 
-    @media (max-width: 980px) {
-      .side-panel {
-        top: auto;
-        bottom: 112px;
-        right: 18px;
-      }
-
-      .object-rail {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        bottom: 16px;
-      }
-
-      .status { display: none; }
+    /* 로딩 */
+    #loading {
+      position: fixed; inset: 0; background: #0b0e0d;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 14px; z-index: 10; transition: opacity .5s ease;
     }
-
-    @media (max-width: 640px) {
-      .hud,
-      .side-panel {
-        position: static;
-        width: auto;
-        margin: 12px;
-      }
-
-      .screen-ui {
-        position: fixed;
-        inset: 0;
-        pointer-events: none;
-        z-index: 4;
-      }
-
-      .screen-ui > * { pointer-events: auto; }
-
-      .object-rail {
-        grid-template-columns: 1fr;
-        max-height: 34vh;
-        overflow: auto;
-      }
-    }
+    #loading.done { opacity: 0; pointer-events: none; }
+    #loading span { color: var(--muted); font-size: 13px; }
+    .spinner { width: 34px; height: 34px; border-radius: 50%;
+      border: 3px solid rgba(139,199,176,.18); border-top-color: var(--jade);
+      animation: spin .8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
-  <div id="scene" aria-label="세종대왕 동상 위치의 조선 제도와 문화 기억의 방"></div>
 
-  <div class="screen-ui">
-    <section class="hud">
-      <div class="kicker">Room 03 · Sejong Statue</div>
-      <h1>조선의 제도와 문화</h1>
-      <p>세종대왕 동상 위치에서 들어온 대표 기억의 방입니다. 입구에서 중앙 책상, 좌우 사물, 뒤쪽 지도로 시선이 이어지도록 배치했습니다.</p>
-      <div class="controls">
-        <a class="button" href="/">광화문 맵</a>
-        <button id="resetView" type="button">입구 시점</button>
-        <button id="nextObject" type="button">다음 사물</button>
-      </div>
-    </section>
+  <div id="loading"><div class="spinner"></div><span>방을 불러오는 중...</span></div>
 
-    <aside class="side-panel" aria-live="polite">
-      <div class="kicker">Selected Memory Object</div>
-      <h2 id="conceptTitle">훈민정음</h2>
-      <p id="conceptSummary">백성이 쉽게 익힐 수 있도록 창제된 문자 체계를 빛나는 책으로 기억합니다.</p>
-      <div class="cue">
-        <strong>공간 단서</strong>
-        <p id="conceptCue">입구 정면의 책이 가장 먼저 보이도록 두어 방의 중심 기억으로 고정합니다.</p>
-      </div>
-    </aside>
+  <div id="scene"></div>
 
-    <section class="object-rail" id="objectRail" aria-label="기억 사물 목록"></section>
-    <div class="status">WASD로 이동, 마우스 드래그로 시점 회전, 사물 클릭으로 개념을 확인합니다.</div>
+  <!-- HUD -->
+  <div class="hud">
+    <div class="kicker">Room 03 · Sejong Statue</div>
+    <h1>조선의 제도와 문화</h1>
+    <div class="controls">
+      <a class="button" href="/">광화문 맵</a>
+      <button id="btnReset">입구 시점</button>
+    </div>
   </div>
 
+  <!-- 설명 카드 -->
+  <div class="card" id="card">
+    <div class="hd">
+      <span class="num-badge" id="cardNum">1</span>
+      <h2 id="cardName">—</h2>
+      <button class="x" id="cardClose">✕</button>
+    </div>
+    <div class="desc" id="cardDesc"></div>
+  </div>
+
+  <div class="status">드래그: 시점 회전 &nbsp;|&nbsp; WASD: 이동 &nbsp;|&nbsp; 번호 클릭: 설명</div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+
   <script type="module">
-    import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
+    import * as THREE from "three";
+    import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
-    const ROOM_OBJECTS = [
-      {
-        id: "hunminjeongeum-book",
-        concept: "훈민정음",
-        visualCue: "빛나는 책",
-        summary: "백성이 쉽게 익힐 수 있도록 창제된 문자 체계를 기억합니다.",
-        cue: "입구 정면의 낮은 책상 위에서 가장 먼저 빛나는 책입니다.",
-        position: [0, 0.92, -2.35],
-        rotation: [0, 0, 0],
-        scale: 1,
-        type: "book"
-      },
-      {
-        id: "jiphyeonjeon-archive",
-        concept: "집현전",
-        visualCue: "문서함",
-        summary: "학자들이 연구와 편찬을 이어간 지식 생산 기관입니다.",
-        cue: "왼쪽 벽의 문서함은 학문과 기록이 쌓이는 장소로 배치했습니다.",
-        position: [-2.35, 0.88, -1.25],
-        rotation: [0, 0.35, 0],
-        scale: 1,
-        type: "archive"
-      },
-      {
-        id: "science-sundial",
-        concept: "과학기술",
-        visualCue: "해시계",
-        summary: "천문, 시간, 측량 기술의 발전을 하나의 과학 사물로 묶습니다.",
-        cue: "오른쪽 전면의 해시계는 빛과 그림자로 과학기술을 떠올리게 합니다.",
-        position: [2.15, 0.86, -1.55],
-        rotation: [0, -0.35, 0],
-        scale: 1,
-        type: "sundial"
-      },
-      {
-        id: "law-stone-tablet",
-        concept: "유교 정치와 법제",
-        visualCue: "비석",
-        summary: "국가 운영의 규범, 법, 예치 질서를 단단한 비석으로 기억합니다.",
-        cue: "왼쪽 뒤 비석은 변하지 않는 제도와 규범의 무게를 맡습니다.",
-        position: [-1.75, 1.08, -3.75],
-        rotation: [0, -0.2, 0],
-        scale: 1,
-        type: "tablet"
-      },
-      {
-        id: "state-map",
-        concept: "국가 운영",
-        visualCue: "벽면 지도",
-        summary: "토지, 행정, 군사, 문화 정책이 하나의 국가 운영 구조로 연결됩니다.",
-        cue: "방의 가장 안쪽 지도는 앞의 개념들을 하나의 체계로 합치는 마지막 단서입니다.",
-        position: [1.72, 1.32, -4.28],
-        rotation: [0, 0, 0],
-        scale: 1,
-        type: "map"
-      }
-    ];
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // 마커/설명은 my-room-3d-hotspots.json 에서 읽어온다.
+    // 설명(userDescription)은 아직 비어 있어 카드의 설명란은 공백으로 표시된다.
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+    /* ── 기본 세팅 ── */
     const sceneRoot = document.getElementById("scene");
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x101614);
-    scene.fog = new THREE.FogExp2(0x101614, 0.035);
+    const scene  = new THREE.Scene();
+    scene.background = new THREE.Color(0x0e1210);
+    scene.fog = new THREE.FogExp2(0x0e1210, 0.012);
 
-    const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 120);
+    const camera = new THREE.PerspectiveCamera(65, innerWidth / innerHeight, 0.05, 400);
     camera.rotation.order = "YXZ";
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.65));
-    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.65));
+    renderer.setSize(innerWidth, innerHeight);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
-    renderer.shadowMap.enabled = false;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.1;
     sceneRoot.appendChild(renderer.domElement);
 
-    const clock = new THREE.Clock();
+    const clock     = new THREE.Clock();
     const raycaster = new THREE.Raycaster();
-    const pointer = new THREE.Vector2();
-    const keys = new Set();
-    const clickTargets = [];
-    const memoryGroups = new Map();
-    const supportsPointerEvents = "PointerEvent" in window;
+    const pointer   = new THREE.Vector2();
+    const keys      = new Set();
 
-    let yaw = 0;
-    let pitch = -0.02;
-    let dragging = false;
-    let lastPointer = null;
-    let activeObjectId = ROOM_OBJECTS[0].id;
+    let yaw = 0, pitch = 0;
+    let lastPt = null, didDrag = false;
+    let roomCenter = new THREE.Vector3();
+    let roomRadius = 12;
 
-    const materials = {
-      floor: new THREE.MeshStandardMaterial({ color: 0x6f756d, roughness: 0.92, metalness: 0.02 }),
-      wall: new THREE.MeshStandardMaterial({ color: 0x2f3832, roughness: 0.88 }),
-      darkWood: new THREE.MeshStandardMaterial({ color: 0x3a2a1f, roughness: 0.72 }),
-      warmWood: new THREE.MeshStandardMaterial({ color: 0x7a5637, roughness: 0.70 }),
-      jade: new THREE.MeshStandardMaterial({ color: 0x8bc7b0, roughness: 0.48, metalness: 0.08 }),
-      gold: new THREE.MeshStandardMaterial({ color: 0xc7a55a, roughness: 0.36, metalness: 0.48 }),
-      bronze: new THREE.MeshStandardMaterial({ color: 0x8a6044, roughness: 0.42, metalness: 0.42 }),
-      paper: new THREE.MeshStandardMaterial({ color: 0xe9ddc4, roughness: 0.86 }),
-      stone: new THREE.MeshStandardMaterial({ color: 0x9a9a8e, roughness: 0.96 }),
-      ink: new THREE.MeshStandardMaterial({ color: 0x1d2422, roughness: 0.80 }),
-      glow: new THREE.MeshStandardMaterial({ color: 0xb8fff0, emissive: 0x5bd3bc, emissiveIntensity: 1.3, roughness: 0.36 })
-    };
+    // objects[i] = { num, center, sprite, name, hotspot }
+    const objects = [];
+    const sprites = [];   // 레이캐스트 대상
+    let selIdx = -1;
 
-    initScene();
-    renderObjectRail();
-    selectRoomObject(activeObjectId);
-    resetCamera();
-    animate();
-    loadMockSpec();
+    /* ── 조명 ── */
+    scene.add(new THREE.HemisphereLight(0xfff5dc, 0x1a0e00, 2.0));
+    const sun = new THREE.DirectionalLight(0xffe8b0, 2.2);
+    sun.position.set(-5, 10, 4); scene.add(sun);
+    const fill = new THREE.PointLight(0x8bc7b0, 2.5, 40);
+    fill.position.set(0, 5, 0); scene.add(fill);
 
-    function initScene() {
-      const hemi = new THREE.HemisphereLight(0xeaf6ee, 0x15201b, 1.25);
-      scene.add(hemi);
+    /* ── 핫스팟(마커) 데이터 ── */
+    let HOTSPOTS = [];
 
-      const key = new THREE.DirectionalLight(0xffe0a0, 2.4);
-      key.position.set(-3.8, 6.2, 2.6);
-      scene.add(key);
+    /* ── 핫스팟 JSON 먼저 읽고 → GLB 로드 ── */
+    fetch("/models/my-room-3d-hotspots.json")
+      .then((r) => r.json())
+      .then((data) => { HOTSPOTS = data.hotspots || []; })
+      .catch((e) => console.error("핫스팟 로드 실패:", e))
+      .finally(loadRoom);
 
-      const fill = new THREE.PointLight(0x8bc7b0, 5.5, 9);
-      fill.position.set(0, 2.5, -2.2);
-      scene.add(fill);
+    function loadRoom() {
+      new GLTFLoader().load("/models/the_smoking_room.glb", (gltf) => {
+        const model = gltf.scene;
 
-      createRoomShell();
-      createGuideRoute();
-      ROOM_OBJECTS.forEach((object, index) => createMemoryObject(object, index));
+        const box  = new THREE.Box3().setFromObject(model);
+        const size = box.getSize(new THREE.Vector3());
+        const ctr  = box.getCenter(new THREE.Vector3());
+        const sc   = 32 / Math.max(size.x, size.z);
+        model.scale.setScalar(sc);
+        model.position.set(-ctr.x * sc, -box.min.y * sc, -ctr.z * sc);
+        scene.add(model);
+        model.updateMatrixWorld(true);
+
+        const wb = new THREE.Box3().setFromObject(model);
+        roomCenter = wb.getCenter(new THREE.Vector3());
+        const ws = wb.getSize(new THREE.Vector3());
+        roomRadius = Math.max(ws.x, ws.z) / 2 - 1;
+
+        buildMarkers(wb);
+        resetCamera();
+        hideLoading();
+      }, undefined, (e) => { console.error("GLB load error:", e); hideLoading(); });
     }
 
-    function createRoomShell() {
-      addBox([9.8, 0.22, 9.6], [0, -0.11, -1.2], materials.floor);
-      addBox([9.8, 3.5, 0.22], [0, 1.7, -5.9], materials.wall);
-      addBox([0.22, 3.2, 9.6], [-5, 1.55, -1.2], materials.wall);
-      addBox([0.22, 3.2, 9.6], [5, 1.55, -1.2], materials.wall);
-      addBox([9.8, 0.18, 9.6], [0, 3.18, -1.2], new THREE.MeshStandardMaterial({ color: 0x1d2522, roughness: 0.9 }));
-
-      for (let x of [-4.2, -2.1, 2.1, 4.2]) {
-        addBox([0.16, 3.35, 0.16], [x, 1.55, -5.2], materials.darkWood);
-        addBox([0.18, 3.05, 0.18], [x, 1.42, 2.65], materials.darkWood);
-      }
-
-      for (let z of [-5.1, -3.3, -1.5, .3, 2.1]) {
-        addBox([9.6, 0.14, 0.18], [0, 3.05, z], materials.darkWood);
-      }
-
-      addBox([2.2, 0.18, 0.9], [0, 0.5, -2.35], materials.warmWood);
-      addBox([2.45, 0.16, 1.1], [0, 0.74, -2.35], materials.darkWood);
-      addBox([1.6, 2.1, 0.18], [0, 1.05, 2.96], materials.darkWood);
-      addBox([1.15, 1.55, 0.2], [0, 0.75, 2.84], materials.ink);
-    }
-
-    function createGuideRoute() {
-      const points = [
-        new THREE.Vector3(0, 0.025, 2.4),
-        new THREE.Vector3(0, 0.025, .25),
-        new THREE.Vector3(-2.1, 0.025, -1.25),
-        new THREE.Vector3(2.05, 0.025, -1.55),
-        new THREE.Vector3(-1.55, 0.025, -3.55),
-        new THREE.Vector3(1.55, 0.025, -4.45)
-      ];
-      const curve = new THREE.CatmullRomCurve3(points);
-      const tube = new THREE.TubeGeometry(curve, 72, 0.025, 8, false);
-      const line = new THREE.Mesh(tube, new THREE.MeshBasicMaterial({ color: 0x8bc7b0, transparent: true, opacity: .76 }));
-      scene.add(line);
-
-      points.slice(1).forEach((point) => {
-        const ring = new THREE.Mesh(
-          new THREE.TorusGeometry(0.28, 0.012, 8, 36),
-          new THREE.MeshBasicMaterial({ color: 0xc7a55a, transparent: true, opacity: .82 })
-        );
-        ring.position.copy(point);
-        ring.rotation.x = Math.PI / 2;
-        scene.add(ring);
-      });
-    }
-
-    function createMemoryObject(object, index) {
-      const group = new THREE.Group();
-      group.position.set(...object.position);
-      group.rotation.set(...object.rotation);
-      group.scale.setScalar(object.scale);
-      group.userData.roomObject = object;
-
-      if (object.type === "book") createBook(group);
-      if (object.type === "archive") createArchive(group);
-      if (object.type === "sundial") createSundial(group);
-      if (object.type === "tablet") createTablet(group);
-      if (object.type === "map") createMap(group);
-
-      const label = createLabelSprite(`${index + 1}. ${object.visualCue}`);
-      label.position.set(0, 1.05, 0);
-      group.add(label);
-
-      addFakeShadow(object.position[0], object.position[2], object.type === "map" ? .78 : 1);
-      scene.add(group);
-      memoryGroups.set(object.id, group);
-
-      group.traverse((child) => {
-        if (child.isMesh) {
-          child.userData.roomObject = object;
-          clickTargets.push(child);
+    /* ── 핫스팟 마커 배치 ──
+       my-room-3d-hotspots.json 의 좌표계는 스캐너가 정규화한 별도 좌표(±15 규모)라
+       원본 GLB(약 7유닛)와 스케일이 다르다. 따라서 원본 스케일에 기대지 않고,
+       JSON 핫스팟 전체가 차지하는 박스(=방 전체 범위)를 렌더된 모델의 월드 박스(wb)에
+       그대로 매핑해 slot 번호 마커를 배치한다. */
+    function buildMarkers(wb) {
+      // JSON 좌표계에서 핫스팟들이 차지하는 박스 (geometryBox + markerPosition)
+      const jb = new THREE.Box3(
+        new THREE.Vector3(Infinity, Infinity, Infinity),
+        new THREE.Vector3(-Infinity, -Infinity, -Infinity)
+      );
+      HOTSPOTS.forEach((h) => {
+        const g = h.geometryBox;
+        if (g && g.min && g.max) {
+          jb.min.min(new THREE.Vector3(g.min[0], g.min[1], g.min[2]));
+          jb.max.max(new THREE.Vector3(g.max[0], g.max[1], g.max[2]));
+        }
+        const mp = h.markerPosition;
+        if (Array.isArray(mp) && mp.length >= 3) {
+          jb.min.min(new THREE.Vector3(mp[0], mp[1], mp[2]));
+          jb.max.max(new THREE.Vector3(mp[0], mp[1], mp[2]));
         }
       });
-    }
-
-    function createBook(group) {
-      addBoxToGroup(group, [1.18, 0.12, 0.78], [0, 0, 0], materials.paper);
-      addBoxToGroup(group, [1.22, 0.08, 0.82], [0, 0.08, 0], materials.glow);
-      addBoxToGroup(group, [0.045, 0.19, 0.86], [0, 0.07, 0], materials.gold);
-      for (let x of [-0.42, -0.2, 0.24, 0.45]) {
-        addBoxToGroup(group, [0.018, 0.018, 0.68], [x, 0.135, 0], materials.ink);
-      }
-      const light = new THREE.PointLight(0x9effef, 2.6, 3);
-      light.position.set(0, .5, 0);
-      group.add(light);
-    }
-
-    function createArchive(group) {
-      addBoxToGroup(group, [1.05, .82, .42], [0, .18, 0], materials.warmWood);
-      addBoxToGroup(group, [1.16, .12, .5], [0, .67, 0], materials.darkWood);
-      for (let y of [-.04, .18, .4]) {
-        addBoxToGroup(group, [.9, .04, .46], [0, y, .035], materials.gold);
-        addBoxToGroup(group, [.12, .06, .48], [0, y + .055, .055], materials.bronze);
-      }
-    }
-
-    function createSundial(group) {
-      const base = new THREE.Mesh(new THREE.CylinderGeometry(.54, .64, .16, 42), materials.stone);
-      base.position.y = -.04;
-      group.add(base);
-      const face = new THREE.Mesh(new THREE.CylinderGeometry(.48, .5, .045, 42), materials.gold);
-      face.position.y = .08;
-      group.add(face);
-      const gnomon = new THREE.Mesh(new THREE.ConeGeometry(.06, .72, 4), materials.bronze);
-      gnomon.position.set(.12, .48, 0);
-      gnomon.rotation.z = -.55;
-      group.add(gnomon);
-      for (let i = 0; i < 12; i += 1) {
-        const mark = addBoxToGroup(group, [.025, .035, .18], [0, .125, -.34], materials.ink);
-        mark.rotation.y = (Math.PI * 2 * i) / 12;
-      }
-    }
-
-    function createTablet(group) {
-      addBoxToGroup(group, [.96, 1.42, .18], [0, .24, 0], materials.stone);
-      addBoxToGroup(group, [1.22, .16, .38], [0, -.54, 0], materials.darkWood);
-      addBoxToGroup(group, [.72, .055, .21], [0, .74, .02], materials.gold);
-      for (let y of [.45, .2, -.05]) {
-        addBoxToGroup(group, [.62, .035, .22], [0, y, .025], materials.ink);
-      }
-    }
-
-    function createMap(group) {
-      addBoxToGroup(group, [1.55, 1.05, .08], [0, 0, 0], materials.paper);
-      addBoxToGroup(group, [1.7, .08, .12], [0, .6, 0], materials.darkWood);
-      addBoxToGroup(group, [1.7, .08, .12], [0, -.6, 0], materials.darkWood);
-      addBoxToGroup(group, [.12, .7, .11], [-.34, .04, .04], materials.jade);
-      addBoxToGroup(group, [.48, .08, .11], [.26, .18, .04], materials.bronze);
-      addBoxToGroup(group, [.68, .08, .11], [.18, -.18, .04], materials.gold);
-      addBoxToGroup(group, [.08, .48, .11], [.52, -.1, .04], materials.ink);
-    }
-
-    function addBox(size, position, material) {
-      const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), material);
-      mesh.position.set(...position);
-      scene.add(mesh);
-      return mesh;
-    }
-
-    function addBoxToGroup(group, size, position, material) {
-      const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), material);
-      mesh.position.set(...position);
-      group.add(mesh);
-      return mesh;
-    }
-
-    function addFakeShadow(x, z, scale = 1) {
-      const shadow = new THREE.Mesh(
-        new THREE.CircleGeometry(.62 * scale, 40),
-        new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: .25, depthWrite: false })
+      const jSize = jb.getSize(new THREE.Vector3());
+      const wSize = wb.getSize(new THREE.Vector3());
+      // JSON 좌표 → 렌더 월드 좌표 (방 박스끼리 축별 매핑)
+      const toWorld = (p) => new THREE.Vector3(
+        wb.min.x + ((p[0] - jb.min.x) / (jSize.x || 1)) * wSize.x,
+        wb.min.y + ((p[1] - jb.min.y) / (jSize.y || 1)) * wSize.y,
+        wb.min.z + ((p[2] - jb.min.z) / (jSize.z || 1)) * wSize.z
       );
-      shadow.position.set(x, .026, z);
-      shadow.rotation.x = -Math.PI / 2;
-      scene.add(shadow);
-    }
 
-    function createLabelSprite(text) {
-      const canvas = document.createElement("canvas");
-      canvas.width = 512;
-      canvas.height = 128;
-      const ctx = canvas.getContext("2d");
-      ctx.fillStyle = "rgba(12, 14, 13, 0.78)";
-      ctx.strokeStyle = "rgba(139, 199, 176, 0.62)";
-      ctx.lineWidth = 4;
-      roundRect(ctx, 10, 16, 492, 86, 18);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = "#f6f2e8";
-      ctx.font = "700 34px Malgun Gothic, sans-serif";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(text, 256, 60);
-      const texture = new THREE.CanvasTexture(canvas);
-      texture.colorSpace = THREE.SRGBColorSpace;
-      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true }));
-      sprite.scale.set(1.55, .39, 1);
-      return sprite;
-    }
+      HOTSPOTS.forEach((h) => {
+        const num = h.slot;
+        const mp = h.markerPosition;
+        if (!Array.isArray(mp) || mp.length < 3) return;
+        const worldPos = toWorld(mp);
 
-    function roundRect(ctx, x, y, width, height, radius) {
-      ctx.beginPath();
-      ctx.moveTo(x + radius, y);
-      ctx.arcTo(x + width, y, x + width, y + height, radius);
-      ctx.arcTo(x + width, y + height, x, y + height, radius);
-      ctx.arcTo(x, y + height, x, y, radius);
-      ctx.arcTo(x, y, x + width, y, radius);
-      ctx.closePath();
-    }
-
-    function renderObjectRail() {
-      const rail = document.getElementById("objectRail");
-      rail.innerHTML = "";
-      ROOM_OBJECTS.forEach((object, index) => {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "object-card";
-        button.dataset.objectId = object.id;
-        button.innerHTML = `<strong>${index + 1}. ${object.concept}</strong><span>${object.visualCue}</span>`;
-        button.addEventListener("click", () => selectRoomObject(object.id, true));
-        rail.appendChild(button);
-      });
-    }
-
-    function selectRoomObject(id, moveView = false) {
-      const object = ROOM_OBJECTS.find((item) => item.id === id) || ROOM_OBJECTS[0];
-      activeObjectId = object.id;
-      document.getElementById("conceptTitle").textContent = object.concept;
-      document.getElementById("conceptSummary").textContent = object.summary;
-      document.getElementById("conceptCue").textContent = object.cue;
-      document.querySelectorAll(".object-card").forEach((card) => {
-        card.classList.toggle("active", card.dataset.objectId === object.id);
-      });
-
-      memoryGroups.forEach((group, groupId) => {
-        const active = groupId === object.id;
-        group.traverse((child) => {
-          if (child.isMesh && child.material && "emissiveIntensity" in child.material) {
-            child.material.emissiveIntensity = active ? 1.55 : .65;
-          }
+        const mat = new THREE.SpriteMaterial({
+          map: makeSpriteTex(num, false),
+          depthTest: false, depthWrite: false, transparent: true, sizeAttenuation: false,
         });
+        const sprite = new THREE.Sprite(mat);
+        sprite.scale.set(0.055, 0.055, 1);
+        sprite.position.copy(worldPos);
+        sprite.renderOrder = 999;
+        sprite.userData.idx = objects.length;
+        scene.add(sprite);
+        sprites.push(sprite);
+        objects.push({ num, center: worldPos.clone(), sprite, name: h.title || `사물 ${num}`, hotspot: h });
       });
-
-      if (moveView) {
-        const target = new THREE.Vector3(...object.position);
-        yaw = Math.atan2(target.x - camera.position.x, -(target.z - camera.position.z));
-        pitch = -0.04;
-        applyCameraRotation();
-      }
+      console.log(`[Room03] 마커 ${objects.length}개 배치`);
+      console.table(objects.map((o) => ({ slot: o.num, name: o.name })));
     }
 
+    /* ── 번호 텍스처 ── */
+    function makeSpriteTex(num, active) {
+      const S = 128, cv = document.createElement("canvas");
+      cv.width = cv.height = S;
+      const ctx = cv.getContext("2d");
+      ctx.beginPath(); ctx.arc(S/2, S/2, S/2 - 5, 0, Math.PI*2);
+      ctx.fillStyle   = active ? "rgba(139,199,176,0.95)" : "rgba(12,14,13,0.9)";
+      ctx.fill();
+      ctx.strokeStyle = active ? "#ffffff" : "#8bc7b0";
+      ctx.lineWidth = 7; ctx.stroke();
+      ctx.fillStyle = active ? "#0b0e0d" : "#8bc7b0";
+      ctx.font = `bold ${num > 9 ? 46 : 56}px sans-serif`;
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(String(num), S/2, S/2 + 3);
+      return new THREE.CanvasTexture(cv);
+    }
+
+    function setSprite(idx, active) {
+      const o = objects[idx]; if (!o) return;
+      o.sprite.material.map.dispose();
+      o.sprite.material.map = makeSpriteTex(o.num, active);
+      o.sprite.material.needsUpdate = true;
+    }
+
+    /* ── 번호 클릭 → 설명 카드 ── */
+    function openCard(idx) {
+      if (selIdx >= 0 && selIdx !== idx) setSprite(selIdx, false);
+      selIdx = idx;
+      setSprite(idx, true);
+      const o = objects[idx];
+      document.getElementById("cardNum").textContent  = o.num;
+      document.getElementById("cardName").textContent = o.name;
+      document.getElementById("cardDesc").textContent = "";   // 설명은 아직 공백
+      document.getElementById("card").classList.add("show");
+    }
+    function closeCard() {
+      if (selIdx >= 0) setSprite(selIdx, false);
+      selIdx = -1;
+      document.getElementById("card").classList.remove("show");
+    }
+
+    /* ── 카메라 (1인칭, 방 중앙) ── */
     function resetCamera() {
-      camera.position.set(0, 1.58, 2.35);
-      yaw = 0;
-      pitch = -0.04;
-      applyCameraRotation();
-      clampPlayer();
+      camera.position.set(roomCenter.x, Math.max(roomCenter.y * 0.7, 1.6), roomCenter.z);
+      yaw = 0; pitch = 0; applyRot();
     }
-
+    function applyRot() {
+      pitch = THREE.MathUtils.clamp(pitch, -Math.PI * 0.49, Math.PI * 0.49);
+      camera.rotation.set(pitch, yaw, 0);
+    }
     function clampPlayer() {
-      camera.position.x = THREE.MathUtils.clamp(camera.position.x, -4.1, 4.1);
-      camera.position.z = THREE.MathUtils.clamp(camera.position.z, -5.15, 2.55);
-      camera.position.y = 1.58;
+      const r = roomRadius;
+      camera.position.x = THREE.MathUtils.clamp(camera.position.x, roomCenter.x - r, roomCenter.x + r);
+      camera.position.z = THREE.MathUtils.clamp(camera.position.z, roomCenter.z - r, roomCenter.z + r);
+      camera.position.y = Math.max(roomCenter.y * 0.7, 1.6);
     }
 
-    function applyCameraRotation() {
-      pitch = THREE.MathUtils.clamp(pitch, -0.78, 0.46);
-      camera.rotation.x = pitch;
-      camera.rotation.y = yaw;
-      camera.rotation.z = 0;
-    }
-
-    function updatePointer(event) {
-      const rect = renderer.domElement.getBoundingClientRect();
-      pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-      pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-    }
-
-    function pickObject(event) {
-      updatePointer(event);
-      raycaster.setFromCamera(pointer, camera);
-      const hits = raycaster.intersectObjects(clickTargets, true);
-      if (!hits.length) return false;
-      const object = findRoomObject(hits[0].object);
-      if (!object) return false;
-      selectRoomObject(object.id);
-      return true;
-    }
-
-    function findRoomObject(mesh) {
-      let current = mesh;
-      while (current) {
-        if (current.userData && current.userData.roomObject) return current.userData.roomObject;
-        current = current.parent;
-      }
-      return null;
-    }
-
-    function updateMovement(delta) {
-      const direction = new THREE.Vector3();
-      const forward = new THREE.Vector3(Math.sin(yaw), 0, -Math.cos(yaw));
-      const right = new THREE.Vector3(Math.cos(yaw), 0, Math.sin(yaw));
-      if (keys.has("KeyW")) direction.add(forward);
-      if (keys.has("KeyS")) direction.sub(forward);
-      if (keys.has("KeyD")) direction.add(right);
-      if (keys.has("KeyA")) direction.sub(right);
-      if (direction.lengthSq() > 0) {
-        direction.normalize();
-        const speed = keys.has("ShiftLeft") || keys.has("ShiftRight") ? 3.1 : 2.05;
-        camera.position.addScaledVector(direction, speed * delta);
+    /* ── 이동 ── */
+    function updateMovement(dt) {
+      const dir = new THREE.Vector3();
+      const fwd = new THREE.Vector3(Math.sin(yaw), 0, -Math.cos(yaw));
+      const rgt = new THREE.Vector3(Math.cos(yaw), 0,  Math.sin(yaw));
+      if (keys.has("KeyW")) dir.add(fwd);
+      if (keys.has("KeyS")) dir.sub(fwd);
+      if (keys.has("KeyD")) dir.add(rgt);
+      if (keys.has("KeyA")) dir.sub(rgt);
+      if (dir.lengthSq() > 0) {
+        dir.normalize();
+        const spd = (keys.has("ShiftLeft") || keys.has("ShiftRight")) ? 6 : 3.4;
+        camera.position.addScaledVector(dir, spd * dt);
         clampPlayer();
       }
     }
 
-    function animate() {
-      const delta = Math.min(clock.getDelta(), 0.04);
-      updateMovement(delta);
+    /* ── 클릭 → 번호 선택 ── */
+    function onPointerUp(e) {
+      const wasDrag = didDrag;
+      lastPt = null; didDrag = false;
+      if (wasDrag) return;
+
+      const rect = renderer.domElement.getBoundingClientRect();
+      pointer.x =  ((e.clientX - rect.left) / rect.width)  * 2 - 1;
+      pointer.y = -((e.clientY - rect.top)  / rect.height) * 2 + 1;
+      raycaster.setFromCamera(pointer, camera);
+      const hits = raycaster.intersectObjects(sprites);
+      if (hits.length) openCard(hits[0].object.userData.idx);
+      else closeCard();
+    }
+
+    /* ── 렌더 루프 ── */
+    (function animate() {
+      const dt = Math.min(clock.getDelta(), 0.05);
+      updateMovement(dt);
       renderer.render(scene, camera);
       requestAnimationFrame(animate);
-    }
+    })();
 
-    async function loadMockSpec() {
-      try {
-        const response = await fetch("public/memory-palace-spec.mock.json", { cache: "no-store" });
-        if (!response.ok) return;
-        const spec = await response.json();
-        document.querySelector(".hud p").textContent = `${spec.sourceSummary} 입구에서 중앙 책상, 좌우 기억 사물, 뒤쪽 지도로 시선이 이어집니다.`;
-      } catch {
-        // The static ROOM_OBJECTS data is enough for offline demos.
-      }
-    }
-
-    window.addEventListener("keydown", (event) => {
-      if (event.code.startsWith("Key") || event.code.startsWith("Shift")) keys.add(event.code);
+    /* ── 이벤트 ── */
+    window.addEventListener("keydown", e => {
+      if (e.code.startsWith("Key") || e.code.startsWith("Shift")) keys.add(e.code);
     });
+    window.addEventListener("keyup", e => keys.delete(e.code));
 
-    window.addEventListener("keyup", (event) => {
-      keys.delete(event.code);
+    sceneRoot.addEventListener("pointerdown", e => {
+      didDrag = false; lastPt = { x: e.clientX, y: e.clientY };
     });
-
-    sceneRoot.addEventListener("pointerdown", (event) => {
-      if (pickObject(event)) return;
-      dragging = true;
-      lastPointer = { x: event.clientX, y: event.clientY };
-      if (supportsPointerEvents && sceneRoot.setPointerCapture) {
-        try { sceneRoot.setPointerCapture(event.pointerId); } catch {}
+    sceneRoot.addEventListener("pointermove", e => {
+      if (!lastPt) return;
+      const dx = e.clientX - lastPt.x, dy = e.clientY - lastPt.y;
+      if (!didDrag && (Math.abs(dx) > 3 || Math.abs(dy) > 3)) didDrag = true;
+      if (didDrag) {
+        yaw   += dx * 0.0016;
+        pitch += dy * 0.0014;
+        applyRot();
+        lastPt = { x: e.clientX, y: e.clientY };
       }
     });
+    sceneRoot.addEventListener("pointerup",    onPointerUp);
+    sceneRoot.addEventListener("pointerleave", () => { lastPt = null; didDrag = false; });
 
-    sceneRoot.addEventListener("pointermove", (event) => {
-      if (!dragging || !lastPointer) return;
-      const dx = event.clientX - lastPointer.x;
-      const dy = event.clientY - lastPointer.y;
-      lastPointer = { x: event.clientX, y: event.clientY };
-      yaw -= dx * 0.0032;
-      pitch -= dy * 0.0026;
-      applyCameraRotation();
-    });
-
-    sceneRoot.addEventListener("pointerup", () => {
-      dragging = false;
-      lastPointer = null;
-    });
-
-    sceneRoot.addEventListener("pointerleave", () => {
-      dragging = false;
-      lastPointer = null;
-    });
-
-    document.getElementById("resetView").addEventListener("click", resetCamera);
-    document.getElementById("nextObject").addEventListener("click", () => {
-      const currentIndex = ROOM_OBJECTS.findIndex((object) => object.id === activeObjectId);
-      const next = ROOM_OBJECTS[(currentIndex + 1) % ROOM_OBJECTS.length];
-      selectRoomObject(next.id, true);
-    });
+    document.getElementById("btnReset").addEventListener("click", resetCamera);
+    document.getElementById("cardClose").addEventListener("click", closeCard);
 
     window.addEventListener("resize", () => {
-      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.aspect = innerWidth / innerHeight;
       camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setSize(innerWidth, innerHeight);
     });
+
+    function hideLoading() {
+      const el = document.getElementById("loading");
+      el.classList.add("done");
+      setTimeout(() => el.remove(), 600);
+    }
   </script>
 </body>
 </html>
