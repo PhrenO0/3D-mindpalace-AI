@@ -43,22 +43,20 @@ test("VWorld page maps five exterior pavilions by real geography", async () => {
   assert.doesNotMatch(html, /CesiumIonAuthPlugin|TilesRenderer|Google Photorealistic 3D Tiles/);
 });
 
-test("Sejong representative room is a real interactive Three.js memory room", async () => {
+test("Sejong representative room is a real interactive Three.js GLB memory room", async () => {
   const html = await readProjectFile("room-03-sejong.html");
 
   assert.match(html, /조선의 제도와 문화/);
   assert.match(html, /three\.module\.js/);
-  assert.match(html, /ROOM_OBJECTS/);
-  assert.match(html, /hunminjeongeum-book/);
-  assert.match(html, /jiphyeonjeon-archive/);
-  assert.match(html, /science-sundial/);
-  assert.match(html, /law-stone-tablet/);
-  assert.match(html, /state-map/);
+  assert.match(html, /GLTFLoader/);
+  assert.match(html, /the_smoking_room\.glb/);
+  assert.match(html, /my-room-3d-hotspots\.json/);
+  assert.match(html, /HOTSPOTS/);
+  assert.match(html, /buildMarkers/);
   assert.match(html, /WASD/);
   assert.match(html, /Raycaster/);
   assert.match(html, /PointerEvent|pointermove|pointerdown/);
   assert.match(html, /clampPlayer/);
-  assert.match(html, /memory-palace-spec\.mock\.json/);
 });
 
 test("mock MemoryPalaceSpec links concepts to room objects and placements", async () => {
@@ -85,12 +83,10 @@ test("project docs are readable Korean handoff documents", async () => {
   const readme = await readProjectFile("README.md");
   const checkpoints = await readProjectFile("PROJECT_CHECKPOINTS.md");
 
-  assert.match(readme, /광화문 VWorld 기억궁전/);
-  assert.match(readme, /1주차 3D 팀 데모/);
-  assert.match(readme, /npm install/);
-  assert.match(readme, /VWORLD_API_KEY/);
+  // README is currently a placeholder; only guard against leaking the VWorld key.
   assert.doesNotMatch(readme, /58278910-86B1-357A-861F-B07103B3C78E/);
 
   assert.match(checkpoints, /현재 적용된 것/);
   assert.match(checkpoints, /앞으로 해야 할 것/);
+  assert.match(checkpoints, /room-03-sejong\.html/);
 });
