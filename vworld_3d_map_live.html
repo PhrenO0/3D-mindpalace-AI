@@ -2071,27 +2071,32 @@
         const engine = window.Cesium;
         if (!viewer || !engine) return;
 
-        const lon = PALACE_BUILDINGS[2].lon;
-        const lat = PALACE_BUILDINGS[2].lat + 0.000216; // 세종대왕 동상 북쪽(뒤) ~24m
+        const GATE_URI =
+          "https://9aiteam1.blob.core.windows.net/models/korean_gate.glb";
+        const LAT_OFFSET = 0.000216; // 동상 북쪽(뒤) ~24m
+        const entityToPage = new Map(); // 한옥 엔티티 → 입장할 room 페이지
 
-        function placeModel(groundAlt) {
+        // 건물 1개에 한옥 모델을 배치하고, 해당 2D 오버레이는 숨긴다.
+        function placeOne(building, index, groundAlt) {
           try {
+            const lon = building.lon;
+            const lat = building.lat + LAT_OFFSET;
             const position = engine.Cartesian3.fromDegrees(lon, lat, groundAlt + 10);
             const hpr = new engine.HeadingPitchRoll(engine.Math.toRadians(90), 0, 0);
             const orientation = engine.Transforms.headingPitchRollQuaternion(position, hpr);
 
             const entity = viewer.entities.add({
-              name: "room-03-korean-gate",
+              name: building.id + "-korean-gate",
               position,
               orientation,
               model: {
-                uri: "https://9aiteam1.blob.core.windows.net/models/korean_gate.glb",
+                uri: GATE_URI,
                 scale: 0.5,
                 minimumPixelSize: 128,
                 maximumScale: 200000,
               },
               label: {
-                text: "3. 세종대왕 동상\n대표 3D 방 — 클릭하여 입장",
+                text: `${index + 1}. ${building.title}\n클릭하여 입장`,
                 font: "bold 13px Malgun Gothic, sans-serif",
                 fillColor: engine.Color.fromCssColorString("#f6f2e8"),
                 outlineColor: engine.Color.fromCssColorString("#0c0e0d"),
@@ -2105,32 +2110,46 @@
                 distanceDisplayCondition: new engine.DistanceDisplayCondition(0, 1500),
               },
             });
+            // 3번(대표 방, featured)만 클릭 시 입장. 1·2·4·5번은 배치만 하고 이동 없음.
+            if (building.featured) entityToPage.set(entity, building.page);
 
-            const overlay = document.querySelector('[data-building-id="room-03"]');
+            const overlay = document.querySelector(
+              `[data-building-id="${building.id}"]`,
+            );
             if (overlay) overlay.style.display = "none";
-
-            const handler = new engine.ScreenSpaceEventHandler(viewer.scene.canvas);
-            handler.setInputAction((click) => {
-              const picked = viewer.scene.pick(click.position);
-              if (engine.defined(picked) && picked.id === entity) {
-                location.href = "room-03-sejong.html";
-              }
-            }, engine.ScreenSpaceEventType.LEFT_CLICK);
-
-            setStatus("세종대왕 동상 위치에 한국 전통 문 3D 모델을 배치했습니다.");
           } catch (e) {
-            console.warn("GLB 모델 배치 실패:", e);
+            console.warn("GLB 모델 배치 실패:", building.id, e);
           }
         }
 
-        // 해당 지점의 실제 지형 높이를 샘플링해 모델을 정확히 지면에 배치
+        // 5개 건물 모두 배치 + 클릭 핸들러(공통 하나)로 해당 방 입장
+        function placeAll(heights) {
+          PALACE_BUILDINGS.forEach((building, i) => {
+            const h = heights && Number.isFinite(heights[i]) ? heights[i] : 25;
+            placeOne(building, i, h);
+          });
+
+          const handler = new engine.ScreenSpaceEventHandler(viewer.scene.canvas);
+          handler.setInputAction((click) => {
+            const picked = viewer.scene.pick(click.position);
+            if (engine.defined(picked) && entityToPage.has(picked.id)) {
+              location.href = entityToPage.get(picked.id);
+            }
+          }, engine.ScreenSpaceEventType.LEFT_CLICK);
+
+          setStatus("5개 위치에 한옥 3D 모델을 배치했습니다. 클릭하면 해당 방으로 입장합니다.");
+        }
+
+        // 각 지점의 실제 지형 높이를 한 번에 샘플링해 모델을 지면 기준 배치
         try {
-          const carto = engine.Cartographic.fromDegrees(lon, lat);
-          engine.sampleTerrainMostDetailed(viewer.terrainProvider, [carto])
-            .then(([sampled]) => placeModel(Number.isFinite(sampled.height) ? sampled.height : 25))
-            .catch(() => placeModel(25));
+          const cartos = PALACE_BUILDINGS.map((b) =>
+            engine.Cartographic.fromDegrees(b.lon, b.lat + LAT_OFFSET),
+          );
+          engine.sampleTerrainMostDetailed(viewer.terrainProvider, cartos)
+            .then((sampled) => placeAll(sampled.map((s) => s.height)))
+            .catch(() => placeAll(null));
         } catch (_) {
-          placeModel(25);
+          placeAll(null);
         }
       }
 
