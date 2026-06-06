@@ -131,6 +131,7 @@
   <script type="module">
     import * as THREE from "three";
     import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+    import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // 마커/설명은 my-room-3d-hotspots.json 에서 읽어온다.
@@ -192,7 +193,12 @@
       .finally(loadRoom);
 
     function loadRoom() {
-      new GLTFLoader().load(ROOM_GLB_URL, (gltf) => {
+      // Draco 압축 GLB를 풀기 위한 디코더(압축이 아니라 압축 해제기).
+      const dracoLoader = new DRACOLoader();
+      dracoLoader.setDecoderPath("https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/libs/draco/");
+      const loader = new GLTFLoader();
+      loader.setDRACOLoader(dracoLoader);
+      loader.load(ROOM_GLB_URL, (gltf) => {
         const model = gltf.scene;
 
         const box  = new THREE.Box3().setFromObject(model);
