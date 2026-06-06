@@ -2073,7 +2073,10 @@
 
         const GATE_URI =
           "https://9aiteam1.blob.core.windows.net/models/korean_gate.glb";
-        const LAT_OFFSET = 0.000216; // 동상 북쪽(뒤) ~24m
+        // ── 한옥 배치 조절값 (위치/크기가 안 맞으면 이 숫자만 바꾸면 됨) ──
+        const GATE_SCALE = 0.5; // 건물 크기(월드 고정 크기). 작으면 키우세요.
+        const GATE_HEIGHT_OFFSET = 10; // 지면 기준 높이(m). 0이면 지면에 붙음.
+        const LAT_OFFSET = 0; // 마커 기준 남북 보정(도). 0 = 건물 좌표 그대로.
         const entityToPage = new Map(); // 한옥 엔티티 → 입장할 room 페이지
 
         // 건물 1개에 한옥 모델을 배치하고, 해당 2D 오버레이는 숨긴다.
@@ -2081,7 +2084,7 @@
           try {
             const lon = building.lon;
             const lat = building.lat + LAT_OFFSET;
-            const position = engine.Cartesian3.fromDegrees(lon, lat, groundAlt + 10);
+            const position = engine.Cartesian3.fromDegrees(lon, lat, groundAlt + GATE_HEIGHT_OFFSET);
             const hpr = new engine.HeadingPitchRoll(engine.Math.toRadians(90), 0, 0);
             const orientation = engine.Transforms.headingPitchRollQuaternion(position, hpr);
 
@@ -2091,9 +2094,10 @@
               orientation,
               model: {
                 uri: GATE_URI,
-                scale: 0.5,
-                minimumPixelSize: 128,
-                maximumScale: 200000,
+                scale: GATE_SCALE,
+                // minimumPixelSize 없음: 건물처럼 실제 월드 크기로 고정.
+                // → 줌에 따라 주변 지형과 같은 비율로 자연스럽게 보이고,
+                //   인위적 최소 픽셀 크기로 커지거나 가까이서 사라지지 않음.
               },
               label: {
                 text: `${index + 1}. ${building.title}\n클릭하여 입장`,
