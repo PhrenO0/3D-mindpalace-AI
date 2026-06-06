@@ -49,6 +49,9 @@ app.use((error, _req, res, _next) => {
   });
 });
 
-app.listen(PORT, "127.0.0.1", () => {
-  console.log(`Memory Palace dev server: http://127.0.0.1:${PORT}`);
+// Azure App Service 등 호스팅 환경의 리버스 프록시가 닿을 수 있도록 0.0.0.0에 바인딩한다.
+// (127.0.0.1에만 바인딩하면 플랫폼 프론트엔드가 못 닿아 503이 난다.)
+const HOST = "0.0.0.0";
+app.listen(PORT, HOST, () => {
+  console.log(`Memory Palace server: http://${HOST}:${PORT}`);
 });
